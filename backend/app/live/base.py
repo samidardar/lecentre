@@ -22,7 +22,8 @@ class ToolDeclaration:
 @dataclass
 class LiveConfig:
     system_instruction: str
-    voice: str = "Kore"
+    voice: str = "Sulafat"
+    language: str = "fr"
     tools: list[ToolDeclaration] = field(default_factory=list)
     greeting_hint: str = ""  # utilisé par le mock ; Gemini reçoit la consigne via le kickoff
     resumption_handle: str | None = None

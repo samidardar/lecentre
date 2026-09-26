@@ -57,6 +57,7 @@ Production (PostgreSQL + Redis + Qdrant + worker) : `docker compose up --build`.
 | `callwiz gdpr purge` | purge RGPD (RETENTION_DAYS) |
 
 ## Documentation
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — APIs à créer, `.env`, français et voix
 - [docs/API.md](docs/API.md) — endpoints, erreurs, pagination, exemples
 - [docs/WEBSOCKET_EVENTS.md](docs/WEBSOCKET_EVENTS.md) — contrat des événements temps réel
 - [docs/ADR.md](docs/ADR.md) — décisions d'architecture
@@ -67,7 +68,7 @@ Production (PostgreSQL + Redis + Qdrant + worker) : `docker compose up --build`.
 
 ## Tests
 ```bash
-cd backend && .venv/Scripts/python -m pytest -q     # 27 tests : API, isolation multi-tenant, RAG, agents, Supervisor,
+cd backend && .venv/Scripts/python -m pytest -q     # 28 tests : API, isolation multi-tenant, RAG, agents, Supervisor,
                                                     # Twilio (signature, media), barge-in, campagne, 100 appels simultanés
 ```
 

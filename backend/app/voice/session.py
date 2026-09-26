@@ -79,7 +79,8 @@ class CallSession:
             self.rt = CallRuntime(ctx=ctx)
             await self._mark_answered()
             self.live = await get_live_model().connect(LiveConfig(
-                system_instruction=self.plan.instructions, voice=self.plan.voice, tools=declarations(self.plan.tools),
+                system_instruction=self.plan.instructions, voice=self.plan.voice, language=ctx.language,
+                tools=declarations(self.plan.tools),
                 greeting_hint=self.plan.greeting,
             ))
             await record_decision(ctx, self.plan.agent, "session_started", f"agent={self.plan.agent}", tools=self.plan.tools)

@@ -133,3 +133,14 @@ async def test_simulated_inbound_call_end_to_end(client: httpx.AsyncClient, auth
     assert any(dd["decision"] == "route" for dd in debug["decisions"])
     ov = (await client.get("/api/v1/analytics/overview", headers=auth)).json()
     assert ov["total_calls"] == 1 and ov["completed_calls"] == 1
+
+
+async def test_voices_and_french_defaults(client: httpx.AsyncClient, auth: dict[str, str]) -> None:
+    r = (await client.get("/api/v1/organizations/voices", headers=auth)).json()
+    assert r["default_language"] == "fr" and r["default_voice"] == "Sulafat"
+    assert len(r["voices"]) == 30 and r["voices"][0]["recommended_fr"] is True
+    ok = await client.patch("/api/v1/organizations/me", headers=auth, json={"default_voice_id": "achird", "default_language": "fr"})
+    assert ok.json()["default_voice_id"] == "Achird"
+    bad = await client.patch("/api/v1/organizations/me", headers=auth, json={"default_voice_id": "Robot"})
+    assert bad.status_code == 422
+    assert (await client.post("/api/v1/campaigns", headers=auth, json={"name": "x", "language": "de"})).status_code == 422

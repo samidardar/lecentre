@@ -70,7 +70,7 @@ class Organization(IdMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(120), unique=True)
     default_language: Mapped[str] = mapped_column(String(10), default="fr")
-    default_voice_id: Mapped[str] = mapped_column(String(80), default="Kore")
+    default_voice_id: Mapped[str] = mapped_column(String(80), default="")
     timezone: Mapped[str] = mapped_column(String(64), default="Europe/Paris")
     tone: Mapped[str] = mapped_column(String(80), default="professionnel et chaleureux")
     business_description: Mapped[str] = mapped_column(Text, default="")

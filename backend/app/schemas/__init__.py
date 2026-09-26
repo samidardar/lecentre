@@ -8,6 +8,8 @@ from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.languages import LANGUAGES, validate_voice
+
 T = TypeVar("T")
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 
@@ -91,10 +93,19 @@ class OrganizationOut(ORM):
     created_at: datetime
 
 
+def _check_language(v: str | None) -> str | None:
+    if v is not None and v.split("-")[0].lower() not in LANGUAGES:
+        raise ValueError(f"langue non supportée: {v!r} (supportées: {', '.join(LANGUAGES)})")
+    return v
+
+
 class OrganizationUpdate(BaseModel):
     name: str | None = None
     default_language: str | None = None
     default_voice_id: str | None = None
+
+    _v_voice = field_validator("default_voice_id")(classmethod(lambda cls, v: validate_voice(v)))
+    _v_lang = field_validator("default_language")(classmethod(lambda cls, v: _check_language(v)))
     timezone: str | None = None
     tone: str | None = None
     business_description: str | None = None
@@ -116,6 +127,8 @@ class CampaignSchedule(BaseModel):
 
 
 class CampaignBase(BaseModel):
+    _v_voice = field_validator("voice_id", check_fields=False)(classmethod(lambda cls, v: validate_voice(v)))
+    _v_lang = field_validator("language", check_fields=False)(classmethod(lambda cls, v: _check_language(v)))
     name: str = Field(min_length=1, max_length=200)
     objective: Objective = "qualify_lead"
     objective_description: str = ""
@@ -141,6 +154,8 @@ class CampaignCreate(CampaignBase):
 
 
 class CampaignUpdate(BaseModel):
+    _v_voice = field_validator("voice_id", check_fields=False)(classmethod(lambda cls, v: validate_voice(v)))
+    _v_lang = field_validator("language", check_fields=False)(classmethod(lambda cls, v: _check_language(v)))
     name: str | None = None
     objective: Objective | None = None
     objective_description: str | None = None
@@ -224,6 +239,7 @@ class ContactImportResult(BaseModel):
 
 # ---------- Phone numbers ----------
 class PhoneNumberBase(BaseModel):
+    _v_voice = field_validator("voice_id", check_fields=False)(classmethod(lambda cls, v: validate_voice(v)))
     number: str
     provider: Literal["twilio", "mock"] = "twilio"
     direction: Literal["inbound", "outbound", "both"] = "both"
@@ -248,6 +264,7 @@ class PhoneNumberCreate(PhoneNumberBase):
 
 
 class PhoneNumberUpdate(BaseModel):
+    _v_voice = field_validator("voice_id", check_fields=False)(classmethod(lambda cls, v: validate_voice(v)))
     active: bool | None = None
     label: str | None = None
     direction: Literal["inbound", "outbound", "both"] | None = None
@@ -269,6 +286,19 @@ class PhoneNumberOut(ORM, PhoneNumberBase):
     @classmethod
     def _num(cls, v: str) -> str:  # pas de re-validation en sortie
         return v
+
+
+class VoiceOut(BaseModel):
+    name: str
+    style: str
+    recommended_fr: bool
+
+
+class VoicesOut(BaseModel):
+    default_voice: str
+    default_language: str
+    languages: list[dict[str, str]]
+    voices: list[VoiceOut]
 
 
 # ---------- Calls ----------

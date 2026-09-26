@@ -35,15 +35,23 @@ def build_connect_config(cfg: LiveConfig, s: Settings) -> Any:
             )
             for t in cfg.tools
         ])]
+    from app.core.languages import language_profile
+
+    locale = language_profile(cfg.language).locale
+    extra: dict[str, Any] = {}
+    if s.live_affective_dialog:
+        extra["enable_affective_dialog"] = True
     return types.LiveConnectConfig(
+        **extra,
         response_modalities=[types.Modality.AUDIO],
         system_instruction=types.Content(parts=[types.Part(text=cfg.system_instruction)]),
         speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=cfg.voice))
+            voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=cfg.voice)),
+            language_code=locale if s.live_send_language_code else None,
         ),
         temperature=cfg.temperature,
         tools=tools or None,
-        input_audio_transcription=types.AudioTranscriptionConfig(),
+        input_audio_transcription=types.AudioTranscriptionConfig(language_codes=[locale] if s.live_send_language_code else None),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
@@ -189,7 +197,8 @@ class GeminiLiveModel:
         self._settings = settings or get_settings()
         if not self._settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY manquant (LIVE_PROVIDER=gemini)")
-        self._client = genai.Client(api_key=self._settings.gemini_api_key)
+        http_options = {"api_version": "v1beta"} if self._settings.live_affective_dialog else None
+        self._client = genai.Client(api_key=self._settings.gemini_api_key, http_options=http_options)
 
     async def connect(self, config: LiveConfig) -> GeminiLiveSession:
         session = GeminiLiveSession(self._client, self._settings.gemini_live_model, config, self._settings)

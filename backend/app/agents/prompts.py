@@ -5,6 +5,8 @@ import string
 from typing import Any
 
 from app.agents.context import CallContext
+from app.core.config import get_settings
+from app.core.languages import language_profile
 
 OBJECTIVE_LABELS = {
     "confirm_appointment": "confirmer le rendez-vous de l'interlocuteur",
@@ -24,7 +26,10 @@ VOICE_RULES = """RÈGLES DE CONVERSATION VOCALE (impératives) :
 - Confirme les informations importantes (date, heure, nom, numéro) en les reformulant.
 - Dis les nombres, dates et prix de façon naturelle à l'oral.
 - Si tu n'as pas compris, demande poliment de répéter ou reformule.
-- Ton : {tone}. Langue : {language} (réponds dans la langue de l'interlocuteur s'il en change).
+- Ton : {tone}.
+
+LANGUE ({language_name}) :
+{language_rules}
 
 TRANSPARENCE ET CONFORMITÉ :
 - Dès ta première phrase, précise que tu es un assistant virtuel (IA) de {org}.
@@ -70,7 +75,15 @@ def common_rules(ctx: CallContext, tools: list[str]) -> str:
         " : propose le transfert puis appelle transfer_to_human" if "transfer_to_human" in tools
         else " : explique qu'aucun conseiller n'est disponible et propose de prendre un message"
     )
-    return VOICE_RULES.format(tone=ctx.tone, language=ctx.language, org=ctx.org_name, transfer_hint=transfer_hint)
+    lang = language_profile(ctx.language)
+    lock = (
+        f"- Même si l'interlocuteur parle une autre langue, réponds en {lang.name} ; s'il ne comprend pas, "
+        "propose poliment un transfert ou un message."
+        if get_settings().live_language_lock else
+        f"- Commence en {lang.name} ; si l'interlocuteur parle clairement une autre langue, continue dans sa langue."
+    )
+    return VOICE_RULES.format(tone=ctx.tone, language_name=lang.name, language_rules=f"{lang.rules}\n{lock}",
+                              org=ctx.org_name, transfer_hint=transfer_hint)
 
 
 def inbound_instructions(ctx: CallContext, tools: list[str], prefetched: list[dict[str, Any]]) -> tuple[str, str, str]:

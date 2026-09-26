@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_live_model: str = "gemini-3.8-live"
     gemini_text_model: str = "gemini-3.5-flash-lite"
-    gemini_default_voice: str = "Kore"
+    gemini_default_voice: str = "Sulafat"
+    default_language: str = "fr"
+    live_language_lock: bool = True  # force la langue de l'organisation/campagne (sinon suit l'interlocuteur)
+    live_send_language_code: bool = False  # envoie aussi language_code (fr-FR) si le modèle le supporte
+    live_affective_dialog: bool = False  # adapte le ton à l'émotion de l'appelant (API v1beta)
     live_start_sensitivity: Literal["LOW", "HIGH"] = "HIGH"
     live_end_sensitivity: Literal["LOW", "HIGH"] = "HIGH"
     live_silence_duration_ms: int = 350
