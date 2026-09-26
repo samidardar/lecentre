@@ -66,19 +66,26 @@ async def test_pause_and_resume(client: httpx.AsyncClient, auth: dict[str, str])
 async def test_100_concurrent_calls(client: httpx.AsyncClient, auth: dict[str, str]) -> None:
     """Critère MVP : 100 appels simultanés sans blocage ni erreur."""
     manager = get_call_manager()
-    manager.telephony.think_time = 0.3  # type: ignore[attr-defined]  # appels qui durent → vraie concurrence
+    manager.telephony.think_time = 0.8  # type: ignore[attr-defined]  # appels qui durent → vraie concurrence
     cid = await _campaign_with_contacts(client, auth, 100, 100)
     peak = 0
+
+    async def sample() -> None:  # échantillonnage direct, indépendant de la latence HTTP
+        nonlocal peak
+        while True:
+            peak = max(peak, manager.local_active)
+            await asyncio.sleep(0.005)
+
+    sampler = asyncio.create_task(sample())
     t0 = time.perf_counter()
     await client.post(f"/api/v1/campaigns/{cid}/start", headers=auth)
 
     async def finished() -> dict | None:
-        nonlocal peak
-        peak = max(peak, manager.local_active)
         p = (await client.get(f"/api/v1/campaigns/{cid}/progress", headers=auth)).json()
         return p if p["status"] == "completed" else None
 
-    progress = await wait_for(finished, timeout=120, interval=0.02)
+    progress = await wait_for(finished, timeout=120, interval=0.05)
+    sampler.cancel()
     elapsed = time.perf_counter() - t0
     calls = (await client.get(f"/api/v1/calls?campaign_id={cid}&limit=500", headers=auth)).json()["items"]
     failed = [c for c in calls if c["status"] == "failed"]
