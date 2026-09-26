@@ -1,0 +1,40 @@
+# Stack complète : API + worker + PostgreSQL + Redis + Qdrant.  `docker compose up --build`
+x-env: &env
+  ENVIRONMENT: prod
+  DATABASE_URL: postgresql+asyncpg://callwiz:callwiz@postgres:5432/callwiz
+  REDIS_URL: redis://redis:6379/0
+  VECTOR_STORE: qdrant
+  QDRANT_URL: http://qdrant:6333
+  JWT_SECRET: ${JWT_SECRET:?définir JWT_SECRET}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+  LIVE_PROVIDER: ${LIVE_PROVIDER:-mock}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  TELEPHONY_PROVIDER: ${TELEPHONY_PROVIDER:-mock}
+  TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+  TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+  TWILIO_DEFAULT_FROM: ${TWILIO_DEFAULT_FROM:-}
+
+services:
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile.backend }
+    environment: *env
+    ports: ["8000:8000"]
+    volumes: ["callwiz-data:/data"]
+    depends_on: [postgres, redis, qdrant]
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"], interval: 15s }
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile.backend }
+    environment: *env
+    command: ["callwiz", "worker"]
+    volumes: ["callwiz-data:/data"]
+    depends_on: [api]
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: callwiz, POSTGRES_PASSWORD: callwiz, POSTGRES_DB: callwiz }
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes: ["qdrant-data:/qdrant/storage"]
+volumes: { callwiz-data: {}, pg-data: {}, qdrant-data: {} }

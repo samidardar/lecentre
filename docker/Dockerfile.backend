@@ -1,0 +1,17 @@
+FROM python:3.12-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /srv
+COPY backend/pyproject.toml backend/
+COPY backend/app backend/app
+COPY backend/cli backend/cli
+COPY backend/alembic backend/alembic
+COPY backend/alembic.ini backend/
+COPY examples examples
+COPY mcp mcp
+RUN pip install "./backend[prod,docs,mcp,embeddings]"
+WORKDIR /srv/backend
+RUN useradd -m callwiz && mkdir -p /data && chown callwiz /data
+USER callwiz
+ENV DATA_DIR=/data
+EXPOSE 8000
+CMD ["sh", "-c", "callwiz db migrate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-ping-interval 20 --no-access-log"]

@@ -1,0 +1,17 @@
+{
+  "event": "call.completed",
+  "call_id": "be3958ff-52ec-4c88-b5cd-a1b23ee26004",
+  "campaign_id": "6c1e8f3a-2b7d-4a55-9d0e-7a1f2c3b4d5e",
+  "contact_id": "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+  "status": "completed",
+  "direction": "outbound",
+  "outcome": "success",
+  "intent": "appointment",
+  "sentiment": 0.82,
+  "summary": "Rendez-vous confirmé pour mardi 14h. Le patient demande un rappel SMS la veille.",
+  "duration_seconds": 74,
+  "cost_estimate": 0.0112,
+  "objections": [],
+  "messages": [],
+  "appointment": {"slot": "mardi 14h", "status": "pending_confirmation"}
+}

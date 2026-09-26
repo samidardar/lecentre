@@ -1,0 +1,15 @@
+{
+  "name": "Confirmation RDV semaine 40",
+  "objective": "confirm_appointment",
+  "objective_description": "Confirmer le rendez-vous de {first_name} le {date_rdv} à {heure_rdv}.",
+  "script": "Si l'interlocuteur ne peut pas venir, proposer un autre créneau via book_appointment.",
+  "context": "Cabinet dentaire Dr Martin, 3 rue des Lilas, Lyon.",
+  "language": "fr",
+  "max_concurrency": 20,
+  "max_attempts": 2,
+  "retry_delay_minutes": 120,
+  "schedule": {"days": [0, 1, 2, 3, 4], "start": "09:00", "end": "19:00"},
+  "voicemail_behavior": "leave_message",
+  "allowed_tools": ["search_knowledge_base", "book_appointment", "transfer_to_human"],
+  "webhook_url": "https://crm.example.com/hooks/callwiz"
+}

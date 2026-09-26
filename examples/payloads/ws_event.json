@@ -1,0 +1,9 @@
+{
+  "id": "5f0c2a9e41d34b7a9a0e7f7d6c1b2a3e",
+  "event": "call.tool_called",
+  "organization_id": "2343f123-21a5-4126-858e-b756ffc49bb6",
+  "call_id": "be3958ff-52ec-4c88-b5cd-a1b23ee26004",
+  "campaign_id": null,
+  "timestamp": "2026-09-27T12:00:00.123Z",
+  "payload": {"tool": "search_knowledge_base", "args": {"query": "horaires d'ouverture"}, "allowed": true, "duration_ms": 2.9}
+}
