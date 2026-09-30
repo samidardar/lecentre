@@ -5,6 +5,7 @@ système (méthode recommandée par Google), et optionnellement par `language_co
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -53,10 +54,27 @@ def language_profile(code: str | None) -> LanguageProfile:
     return LANGUAGES.get((code or "fr").split("-")[0].lower(), LANGUAGES["fr"])
 
 
+FISH_VOICE_ID = re.compile(r"^[0-9a-f]{32}$")
+
+# Voix françaises Fish Audio présélectionnées pour un centre d'appels (bibliothèque publique ; aucune voix
+# imitant une personne réelle). reference_id → (nom, style).
+FISH_FR_VOICES: dict[str, tuple[str, str]] = {
+    "5567200c7d8341738f0892bbacd3be3c": ("Féminine", "femme, naturelle, conversationnelle"),
+    "a288bdc744da4ad194921adad6863175": ("Clémence", "femme, grave, posée"),
+    "10a3a20742114a4ea6dd441e7591850f": ("Manon", "femme, claire, service client"),
+    "0638c82cfa894e8fb71f42487f69e050": ("Narratrice claire", "femme, claire, informative"),
+    "6e10fb8946b34ba6bec447789ccdc3de": ("Stoïc", "homme, calme, professionnel"),
+    "f69bca092b674168a8d02d61ca20943c": ("Lucas", "homme, clair, assistant vocal"),
+}
+
+
 def validate_voice(name: str | None) -> str | None:
+    """Accepte une voix Gemini (par nom) ou une voix Fish Audio (reference_id de 32 caractères hexadécimaux)."""
     if name in (None, ""):
         return name
+    if FISH_VOICE_ID.match(name.lower()):
+        return name.lower()
     match = next((v for v in VOICES if v.lower() == name.lower()), None)
     if match is None:
-        raise ValueError(f"voix inconnue: {name!r}. Voix disponibles : {', '.join(VOICES)}")
+        raise ValueError(f"voix inconnue: {name!r} (attendu : id Fish Audio de 32 caractères, ou voix Gemini : {', '.join(VOICES)})")
     return match

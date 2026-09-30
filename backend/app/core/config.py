@@ -36,8 +36,27 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
     retention_days: int = 90
 
-    # --- Voix / LLM (Gemini Live) ---
-    live_provider: Literal["gemini", "mock"] = "mock"
+    # --- Voix / LLM ---
+    # cascade = Deepgram (STT streaming) → Claude (LLM) → Fish Audio (TTS streaming)
+    live_provider: Literal["cascade", "gemini", "mock"] = "mock"
+    anthropic_api_key: str | None = None
+    anthropic_workspace_id: str | None = None  # requis si la clé n'est pas rattachée à un workspace
+    llm_model: str = "claude-haiku-4-5"
+    llm_max_tokens: int = 400
+    llm_temperature: float = 0.5
+    analysis_model: str = "claude-haiku-4-5"  # analyse post-appel (hors temps réel)
+    deepgram_api_key: str | None = None
+    deepgram_model: str = "nova-3"
+    deepgram_endpointing_ms: int = 300
+    deepgram_utterance_end_ms: int = 1000
+    fish_api_key: str | None = None
+    fish_model: str = "s2.1-pro"
+    fish_voice_id: str | None = None  # reference_id d'une voix Fish Audio (bibliothèque ou clonée)
+    fish_latency: Literal["low", "normal", "balanced"] = "low"
+    fish_sample_rate: int = 24000
+    fish_speed: float = 1.0
+    barge_in_min_words: int = 2
+    # Gemini Live (option alternative)
     gemini_api_key: str | None = None
     gemini_live_model: str = "gemini-3.8-live"
     gemini_text_model: str = "gemini-3.5-flash-lite"

@@ -98,7 +98,7 @@ async def load_call_context(db: AsyncSession, call_id: uuid.UUID) -> CallContext
     ctx = CallContext(
         call_id=str(call.id), organization_id=str(org.id), direction=call.direction,  # type: ignore[arg-type]
         org_name=org.name, org_description=org.business_description, tone=org.tone, language=org.default_language or s.default_language,
-        voice=org.default_voice_id or s.gemini_default_voice, timezone=org.timezone,
+        voice=org.default_voice_id or (s.fish_voice_id if s.live_provider == "cascade" else None) or s.gemini_default_voice, timezone=org.timezone,
         from_number=call.from_number, to_number=call.to_number, transfer_number=org.transfer_number,
         max_duration_s=int((org.settings or {}).get("max_call_seconds", s.default_max_call_seconds)),
     )
