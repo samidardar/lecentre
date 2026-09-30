@@ -8,6 +8,7 @@ Flux :
 from __future__ import annotations
 
 import base64
+import logging
 import hashlib
 import hmac
 from typing import Mapping
@@ -19,6 +20,8 @@ import httpx
 from app.core.config import Settings, get_settings
 from app.core.resilience import CircuitBreaker, retry_async
 from app.telephony.base import DialResult, TelephonyError
+
+logger = logging.getLogger(__name__)
 
 
 def compute_signature(auth_token: str, url: str, params: Mapping[str, str]) -> str:
@@ -57,10 +60,20 @@ class TwilioProvider:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.s = settings or get_settings()
-        if not (self.s.twilio_account_sid and self.s.twilio_auth_token):
-            raise TelephonyError("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN manquants")
+        s = self.s
+        if not s.twilio_account_sid or not s.twilio_account_sid.startswith("AC"):
+            raise TelephonyError("TWILIO_ACCOUNT_SID (AC…) manquant")
+        if s.twilio_api_key_sid and s.twilio_api_key_secret:
+            auth = (s.twilio_api_key_sid, s.twilio_api_key_secret)  # clé API : révocable, recommandée
+        elif s.twilio_auth_token:
+            auth = (s.twilio_account_sid, s.twilio_auth_token)
+        else:
+            raise TelephonyError("TWILIO_API_KEY_SID/SECRET ou TWILIO_AUTH_TOKEN requis")
+        if s.twilio_validate_signature and not s.twilio_auth_token:
+            logger.warning("TWILIO_AUTH_TOKEN absent : signature des webhooks Twilio NON vérifiée. "
+                           "Ajoutez l'Auth Token avant d'exposer le serveur publiquement.")
         self._base = f"https://api.twilio.com/2010-04-01/Accounts/{self.s.twilio_account_sid}"
-        self._http = httpx.AsyncClient(auth=(self.s.twilio_account_sid, self.s.twilio_auth_token), timeout=10,
+        self._http = httpx.AsyncClient(auth=auth, timeout=10,
                                        limits=httpx.Limits(max_connections=50, max_keepalive_connections=20))
         self._breaker = CircuitBreaker("twilio", threshold=8, reset_after=20)
 

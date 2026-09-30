@@ -73,7 +73,9 @@ class Settings(BaseSettings):
     # --- Télécom ---
     telephony_provider: Literal["twilio", "mock"] = "mock"
     twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
+    twilio_auth_token: str | None = None  # requis pour vérifier la signature des webhooks Twilio
+    twilio_api_key_sid: str | None = None  # alternative à l'Auth Token pour l'API REST (SK…)
+    twilio_api_key_secret: str | None = None
     twilio_default_from: str | None = None
     twilio_validate_signature: bool = True
     telephony_calls_per_second: float = 5.0
