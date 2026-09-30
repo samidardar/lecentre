@@ -72,6 +72,7 @@ class CascadeLiveSession:
         self._stt_task: asyncio.Task[None] | None = None
         self._stt_lock = asyncio.Lock()
         self._user_finals: list[str] = []
+        self._pending_turn: asyncio.Task[None] | None = None
         self._pending_notes: list[str] = []
         self._pending_tools: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._closed = False
@@ -124,6 +125,8 @@ class CascadeLiveSession:
     async def _read_stt(self) -> None:
         try:
             async for ev in self._stt.events():
+                if ev.kind in ("partial", "speech_started"):
+                    self._cancel_pending_turn()  # l'appelant reprend la parole : on continue d'écouter
                 if ev.kind == "partial":
                     if self._speaking and len(ev.text.split()) >= self.s.barge_in_min_words:
                         await self._interrupt()
@@ -133,15 +136,34 @@ class CascadeLiveSession:
                     self._user_finals.append(ev.text)
                     await self._q.put(InputTranscript(ev.text))
                 elif ev.kind == "end_of_turn" and self._user_finals:
-                    text = " ".join(self._user_finals)
-                    self._user_finals.clear()
-                    await self._start_turn(text)
+                    self._cancel_pending_turn()
+                    self._pending_turn = asyncio.create_task(self._end_of_turn(self.grace_delay(self._user_finals)))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             if not self._closed:
                 LIVE_ERRORS.labels("stt_stream").inc()
                 await self._q.put(SessionEnded(error=f"STT interrompu: {exc}"))
+
+    @staticmethod
+    def grace_delay(finals: list[str]) -> float:
+        """Une pause après « Bonjour, » ou « Oui » n'est souvent pas une fin de tour : on laisse 600 ms de plus."""
+        text = " ".join(finals).strip()
+        return 0.6 if len(text.split()) <= 2 else 0.0
+
+    def _cancel_pending_turn(self) -> None:
+        if self._pending_turn is not None and not self._pending_turn.done():
+            self._pending_turn.cancel()
+        self._pending_turn = None
+
+    async def _end_of_turn(self, delay: float) -> None:
+        if delay:
+            await asyncio.sleep(delay)
+        if not self._user_finals:
+            return
+        text = " ".join(self._user_finals)
+        self._user_finals.clear()
+        await self._start_turn(text)
 
     # ================================================================ entrée texte
     async def send_text(self, text: str, *, turn_complete: bool = True, role: str = "user") -> None:
@@ -307,6 +329,7 @@ class CascadeLiveSession:
             self._warm = None
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
+        self._cancel_pending_turn()
         if self._stt_task is not None:
             self._stt_task.cancel()
         if self._stt is not None:

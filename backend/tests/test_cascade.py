@@ -166,3 +166,19 @@ async def test_operator_notes_are_merged_into_next_turn() -> None:
     await collect_until(events, TurnComplete)
     assert llm.calls[-1][-1]["content"] == "[SUPERVISEUR] Réponses plus courtes.\nBonjour"
     await session.close()
+
+
+async def test_short_utterance_waits_for_continuation() -> None:
+    session, llm, stt, _ = make_session()
+    events = session.events()
+    await session.send_audio(b"\x00\x00" * 320)
+    await stt.q.put(SttEvent("final", "Bonjour.", True))
+    await stt.q.put(SttEvent("end_of_turn"))
+    await asyncio.sleep(0.2)
+    await stt.q.put(SttEvent("speech_started"))  # l'appelant continue
+    await stt.q.put(SttEvent("final", "je voudrais un rendez-vous demain matin", True))
+    await stt.q.put(SttEvent("end_of_turn"))
+    await collect_until(events, TurnComplete)
+    user_msgs = [m for m in session.messages if m["role"] == "user"]
+    assert len(user_msgs) == 1 and user_msgs[0]["content"] == "Bonjour. je voudrais un rendez-vous demain matin"
+    await session.close()
