@@ -4,13 +4,14 @@ import asyncio
 import contextlib
 import logging
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -121,6 +122,17 @@ def create_app(*, run_dispatcher: bool = True) -> FastAPI:
         return {"status": "ok" if db_ok else "degraded", "db": db_ok, "live_provider": s.live_provider,
                 "telephony_provider": s.telephony_provider, "active_sessions": manager.local_active,
                 "capacity": s.global_max_concurrent_calls}
+
+    console_file = Path(__file__).parent / "static" / "console.html"
+
+    @app.get("/console", include_in_schema=False)
+    async def console() -> FileResponse:
+        """Console web intégrée : appel test au micro, historique, connaissances, campagnes, réglages."""
+        return FileResponse(console_file, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/console")
 
     @app.get("/metrics", tags=["system"], include_in_schema=False)
     async def metrics() -> Response:

@@ -138,3 +138,45 @@ async def ws_campaign(ws: WebSocket, campaign_id: str, token: str = Query(...)) 
 @router.websocket("/ws/analytics")
 async def ws_analytics(ws: WebSocket, token: str = Query(...)) -> None:
     await _serve(ws, token, "analytics")
+
+
+@router.websocket("/ws/webcall")
+async def ws_webcall(ws: WebSocket, token: str = Query(...), phone_number_id: str | None = None,
+                     campaign_id: str | None = None) -> None:
+    """Appel vocal depuis le navigateur : même pipeline que le téléphone (agents, RAG, supervision, analytics)."""
+    from app.models import Contact, PhoneNumber
+    from app.services.call_manager import get_call_manager
+    from app.voice.transport import BrowserTransport
+
+    await ws.accept()
+    try:
+        async with session_factory()() as db:
+            p = await principal_from_token(token, db)
+            direction, to_number, contact_id, pn_id, camp_id = "inbound", "web", None, None, None
+            if campaign_id:
+                camp = await db.get(Campaign, uuid.UUID(campaign_id))
+                if camp is None or camp.organization_id != p.org_id:
+                    raise APIError(404, "not_found", "Campagne introuvable")
+                from sqlalchemy import select
+
+                contact = await db.scalar(select(Contact).where(Contact.campaign_id == camp.id).limit(1))
+                direction, camp_id, contact_id = "outbound", camp.id, contact.id if contact else None
+            else:
+                from sqlalchemy import select
+
+                stmt = select(PhoneNumber).where(PhoneNumber.organization_id == p.org_id)
+                if phone_number_id:
+                    stmt = stmt.where(PhoneNumber.id == uuid.UUID(phone_number_id))
+                pn = await db.scalar(stmt.limit(1))
+                if pn is not None:
+                    pn_id, to_number = pn.id, pn.number
+    except (APIError, ValueError) as exc:
+        detail = exc.detail if isinstance(exc, APIError) else {"code": "bad_request", "message": str(exc)}
+        await ws.send_text(json.dumps({"type": "error", "payload": detail}))
+        await ws.close(code=4401)
+        return
+    manager = get_call_manager()
+    call = await manager.create_call(organization_id=p.org_id, direction=direction, from_number="navigateur", to_number=to_number,
+                                     campaign_id=camp_id, contact_id=contact_id, phone_number_id=pn_id)
+    await ws.send_text(json.dumps({"type": "call", "call_id": str(call.id), "direction": direction}))
+    await manager.start_session(call.id, BrowserTransport(ws))

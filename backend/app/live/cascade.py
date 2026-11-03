@@ -337,14 +337,23 @@ class CascadeLiveSession:
         await self._q.put(SessionEnded())
 
 
+def build_conversation_llm(settings: Settings) -> ConversationLLM:
+    if settings.llm_provider == "openrouter":
+        from app.llm.openrouter import OpenRouterConversation
+
+        return OpenRouterConversation(settings)
+    return ClaudeConversation(settings)
+
+
 class CascadeLiveModel:
     def __init__(self, settings: Settings | None = None, llm: ConversationLLM | None = None) -> None:
         self.s = settings or get_settings()
-        missing = [k for k, v in {"ANTHROPIC_API_KEY": self.s.anthropic_api_key, "DEEPGRAM_API_KEY": self.s.deepgram_api_key,
+        llm_key = ("OPENROUTER_API_KEY", self.s.openrouter_api_key) if self.s.llm_provider == "openrouter"             else ("ANTHROPIC_API_KEY", self.s.anthropic_api_key)
+        missing = [k for k, v in {llm_key[0]: llm_key[1], "DEEPGRAM_API_KEY": self.s.deepgram_api_key,
                                   "FISH_API_KEY": self.s.fish_api_key}.items() if not v]
         if missing and llm is None:
             raise RuntimeError(f"LIVE_PROVIDER=cascade : clés manquantes {', '.join(missing)}")
-        self.llm = llm or ClaudeConversation(self.s)
+        self.llm = llm or build_conversation_llm(self.s)
 
     async def connect(self, config: LiveConfig) -> CascadeLiveSession:
         return CascadeLiveSession(

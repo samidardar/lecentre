@@ -66,7 +66,7 @@ async def test_pause_and_resume(client: httpx.AsyncClient, auth: dict[str, str])
 async def test_100_concurrent_calls(client: httpx.AsyncClient, auth: dict[str, str]) -> None:
     """Critère MVP : 100 appels simultanés sans blocage ni erreur."""
     manager = get_call_manager()
-    manager.telephony.think_time = 0.8  # type: ignore[attr-defined]  # appels qui durent → vraie concurrence
+    manager.telephony.think_time = 2.0  # type: ignore[attr-defined]  # appels de plusieurs secondes : la création des 100 appels (SQLite) ne doit pas dépasser leur durée
     cid = await _campaign_with_contacts(client, auth, 100, 100)
     peak = 0
 

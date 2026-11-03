@@ -17,8 +17,20 @@ STOPWORDS = set(
 )
 
 
+_SUFFIXES = ("issements", "issement", "ements", "ement", "ations", "ation", "euses", "euse", "eurs", "eur",
+             "ables", "able", "ions", "ion", "ees", "ee", "es", "er", "ez", "e", "s", "x")
+
+
+def stem(word: str) -> str:
+    """Racinisation légère du français (accents déjà retirés) : réparations → repar, révisions → revis."""
+    for suf in _SUFFIXES:
+        if len(word) - len(suf) >= 4 and word.endswith(suf):
+            return word[: -len(suf)]
+    return word
+
+
 def terms(text: str) -> list[str]:
-    return [t for t in _TOKEN.findall(normalize(text)) if t not in STOPWORDS and len(t) > 1]
+    return [stem(t) for t in _TOKEN.findall(normalize(text)) if t not in STOPWORDS and len(t) > 1]
 
 
 @dataclass

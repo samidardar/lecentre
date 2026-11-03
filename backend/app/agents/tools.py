@@ -31,7 +31,11 @@ async def search_knowledge_base(rt: CallRuntime, args: dict[str, Any]) -> dict[s
     return {
         "results": [{"content": h["content"][:700], "source": h["source"]} for h in hits],
         "low_confidence": res.low_confidence,
-        "instruction": "Information non trouvée : ne pas inventer, proposer message ou transfert." if res.low_confidence else "",
+        # En confiance faible on transmet quand même les extraits : le modèle juge mieux la pertinence qu'un seuil.
+        "instruction": (
+            "Correspondance incertaine : n'utilise un extrait que s'il répond exactement à la question. Sinon, ne "
+            "pas inventer : dis que tu vas faire vérifier, propose un message ou un transfert."
+        ) if res.low_confidence else "",
     }
 
 

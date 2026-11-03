@@ -94,3 +94,56 @@ async def test_mock_live_barge_in() -> None:
             break
     assert TurnComplete not in seen
     await session.close()
+
+
+class FakeBrowserWS:
+    """Doublure de WebSocket Starlette pour BrowserTransport."""
+
+    def __init__(self, script: list[dict]) -> None:
+        self.script = list(script)
+        self.sent_bytes = 0
+        self.sent_json: list[dict] = []
+
+    async def receive(self) -> dict:
+        if self.script:
+            await asyncio.sleep(0.3)  # laisse l'IA terminer son tour
+            return self.script.pop(0)
+        await asyncio.sleep(0.5)
+        return {"type": "websocket.disconnect"}
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.sent_bytes += len(data)
+
+    async def send_text(self, data: str) -> None:
+        self.sent_json.append(json.loads(data))
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_browser_call_end_to_end() -> None:
+    import uuid as _uuid
+
+    from app.db import session_factory
+    from app.models import Call, Organization
+    from app.services.call_manager import get_call_manager
+    from app.voice.transport import BrowserTransport
+
+    async with session_factory()() as db:
+        org = Organization(name="Web", slug=f"web-{_uuid.uuid4().hex[:6]}")
+        db.add(org)
+        await db.commit()
+    manager = get_call_manager()
+    call = await manager.create_call(organization_id=org.id, direction="inbound", from_number="navigateur", to_number="web")
+    ws = FakeBrowserWS([
+        {"type": "websocket.receive", "bytes": b"\x00\x00" * 640},
+        {"type": "websocket.receive", "text": json.dumps({"type": "text", "text": "Bonjour, vous êtes ouverts ?"})},
+        {"type": "websocket.receive", "text": json.dumps({"type": "hangup"})},
+    ])
+    status = await asyncio.wait_for(manager.start_session(call.id, BrowserTransport(ws)), 20)
+    assert status == "completed"
+    assert ws.sent_bytes > 0  # l'IA a parlé (PCM 24 kHz)
+    assert any(m["type"] == "turn_complete" for m in ws.sent_json)
+    async with session_factory()() as db:
+        row = await db.get(Call, call.id)
+        assert row.transcript and any(t["role"] == "user" for t in row.transcript)

@@ -52,7 +52,15 @@ class HeuristicTextLLM:
         pos, neg = len(_POS.findall(user_text)), len(_NEG.findall(user_text))
         sentiment = 0.5 if pos + neg == 0 else round(0.15 + 0.7 * pos / (pos + neg), 2)
         intent = next((name for name, rx in _INTENT_RULES if rx.search(user_text)), "other")
-        outcome = context.get("outcome") or ("success" if pos > neg and user_text else "failed")
+        if context.get("outcome"):
+            outcome = context["outcome"]
+        elif not user_text:
+            outcome = "failed"
+        elif context.get("direction") == "inbound":
+            # Un appel entrant où l'appelant a pu s'exprimer sans signal négatif dominant est traité.
+            outcome = "success" if neg <= pos else "failed"
+        else:
+            outcome = "success" if pos > neg else "failed"
         n_user = sum(1 for t in transcript if t.get("role") == "user")
         summary = f"Appel {context.get('direction', '')} de {n_user} échanges ; intention « {intent} » ; issue « {outcome} »."
         return CallAnalysis(summary=summary, intent=intent, sentiment=sentiment, outcome=outcome,
@@ -169,6 +177,53 @@ class ClaudeTextLLM:
             return await self._fallback.summarize_chunk(text)
 
 
+class OpenRouterTextLLM:
+    def __init__(self, settings: Any) -> None:
+        self.s = settings
+        self._fallback = HeuristicTextLLM()
+
+    async def analyze_call(self, transcript: list[dict[str, Any]], context: dict[str, Any]) -> CallAnalysis:
+        from app.llm.openrouter import complete_json
+
+        convo = "\n".join(f"{t['role'].upper()}: {t['text']}" for t in transcript if t.get("text"))[-12000:]
+        prompt = (
+            "Analyse cet appel d'un centre d'appels IA et réponds uniquement en JSON.\n"
+            f"Contexte: {json.dumps(context, ensure_ascii=False)}\n"
+            f"intent parmi {INTENTS} ; outcome parmi {OUTCOMES} ; sentiment de l'interlocuteur entre 0 et 1 ; "
+            "summary : 2 phrases maximum en français ; objections : objections exprimées (courtes) ; "
+            "next_best_action : action suivante recommandée.\n\n"
+            f"TRANSCRIPT:\n{convo}"
+        )
+        schema = {
+            "type": "object", "additionalProperties": False,
+            "required": ["summary", "intent", "sentiment", "outcome", "next_best_action", "objections"],
+            "properties": {
+                "summary": {"type": "string"}, "intent": {"type": "string", "enum": INTENTS},
+                "sentiment": {"type": "number"}, "outcome": {"type": "string", "enum": OUTCOMES},
+                "next_best_action": {"type": "string"}, "objections": {"type": "array", "items": {"type": "string"}},
+            },
+        }
+        try:
+            d = await complete_json(self.s, prompt, schema)
+            out = CallAnalysis(
+                summary=str(d.get("summary", ""))[:1000],
+                intent=d.get("intent") if d.get("intent") in INTENTS else "other",
+                sentiment=min(1.0, max(0.0, float(d.get("sentiment", 0.5)))),
+                outcome=d.get("outcome") if d.get("outcome") in OUTCOMES else "failed",
+                next_best_action=str(d.get("next_best_action", ""))[:500],
+                objections=[str(o)[:200] for o in (d.get("objections") or [])][:10],
+            )
+            if context.get("outcome"):
+                out.outcome = context["outcome"]
+            return out
+        except Exception as exc:
+            logger.warning("analyse OpenRouter échouée, fallback heuristique: %s", exc)
+            return await self._fallback.analyze_call(transcript, context)
+
+    async def summarize_chunk(self, text: str) -> str:
+        return await self._fallback.summarize_chunk(text)
+
+
 _llm: TextLLM | None = None
 
 
@@ -176,7 +231,9 @@ def get_text_llm() -> TextLLM:
     global _llm
     if _llm is None:
         s = get_settings()
-        if s.anthropic_api_key and s.live_provider != "mock":
+        if s.llm_provider == "openrouter" and s.openrouter_api_key and s.live_provider != "mock":
+            _llm = OpenRouterTextLLM(s)
+        elif s.anthropic_api_key and s.live_provider != "mock":
             _llm = ClaudeTextLLM(s.anthropic_api_key, s.analysis_model, s.anthropic_workspace_id)
         elif s.gemini_api_key and s.live_provider == "gemini":
             _llm = GeminiTextLLM(s.gemini_api_key, s.gemini_text_model)

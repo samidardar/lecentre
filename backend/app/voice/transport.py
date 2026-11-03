@@ -173,3 +173,68 @@ class SimulatedCallerTransport:
     async def close(self) -> None:
         self._closed.set()
         self._turn_done.set()
+
+
+class BrowserTransport:
+    """Appel depuis le navigateur (micro) via WebSocket : démo et tests sans opérateur téléphonique.
+
+    Navigateur → serveur : trames binaires PCM16 mono 16 kHz ; JSON {"type": "text", "text": …} pour taper une
+    réplique ; {"type": "hangup"} pour raccrocher.
+    Serveur → navigateur : trames binaires PCM16 mono 24 kHz ; JSON {"type": "clear"} (barge-in : couper la lecture)
+    et {"type": "turn_complete"}.
+    """
+
+    def __init__(self, ws: WebSocket) -> None:
+        self.ws = ws
+        self._closed = False
+        self._lock = asyncio.Lock()
+
+    async def receive(self) -> AsyncIterator[InboundMedia]:  # type: ignore[override]
+        try:
+            while True:
+                msg = await self.ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes"):
+                    yield InboundMedia("audio", pcm16k=msg["bytes"])
+                elif msg.get("text"):
+                    try:
+                        data = json.loads(msg["text"])
+                    except json.JSONDecodeError:
+                        continue
+                    if data.get("type") == "hangup":
+                        break
+                    if data.get("type") == "text" and str(data.get("text", "")).strip():
+                        yield InboundMedia("text", text=str(data["text"])[:1000])
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        yield InboundMedia("stop")
+
+    async def _send(self, payload: bytes | dict[str, Any]) -> None:
+        if self._closed:
+            return
+        async with self._lock:
+            try:
+                if isinstance(payload, bytes):
+                    await self.ws.send_bytes(payload)
+                else:
+                    await self.ws.send_text(json.dumps(payload))
+            except Exception:
+                self._closed = True
+
+    async def send_audio(self, pcm24k: bytes) -> None:
+        await self._send(pcm24k)
+
+    async def clear(self) -> None:
+        await self._send({"type": "clear"})
+
+    async def on_assistant_turn_complete(self) -> None:
+        await self._send({"type": "turn_complete"})
+
+    async def close(self) -> None:
+        await self._send({"type": "ended"})
+        self._closed = True
+        try:
+            await self.ws.close()
+        except Exception:
+            pass

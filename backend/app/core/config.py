@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # --- Voix / LLM ---
     # cascade = Deepgram (STT streaming) → Claude (LLM) → Fish Audio (TTS streaming)
     live_provider: Literal["cascade", "gemini", "mock"] = "mock"
+    llm_provider: Literal["openrouter", "anthropic"] = "openrouter"
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "anthropic/claude-haiku-5.5"
+    openrouter_fallback_models: str = "anthropic/claude-haiku-4.5"  # liste séparée par des virgules
+    openrouter_analysis_model: str = "anthropic/claude-haiku-5.5"
     anthropic_api_key: str | None = None
     anthropic_workspace_id: str | None = None  # requis si la clé n'est pas rattachée à un workspace
     llm_model: str = "claude-haiku-4-5"

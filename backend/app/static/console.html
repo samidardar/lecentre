@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CallWiz Console</title>
+<style>
+:root{--bg:#f6f4ee;--panel:#fffdf8;--ink:#1b2533;--muted:#5a6575;--line:#e2ded3;--accent:#0e7c70;--accent-ink:#ffffff;--warn:#b45309;--bad:#b42318;--ai:#e3f4f1;--user:#eef0f4;--tool:#fdf3e7}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1b2d;--panel:#16263c;--ink:#eef1f4;--muted:#a9b5c4;--line:#2a3e5a;--accent:#2bb5a6;--accent-ink:#0f1b2d;--warn:#f2a33a;--bad:#f87171;--ai:#123b3a;--user:#22324a;--tool:#3a2f1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header h1{font-size:18px;margin:0}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--muted);cursor:pointer;font:inherit}
+nav button.on{background:var(--ai);color:var(--ink);font-weight:600}
+.stats{margin-left:auto;display:flex;gap:16px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.stats b{color:var(--ink)}
+main{max-width:1200px;margin:0 auto;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:280px}
+h2{font-size:16px;margin:0 0 12px}
+label{display:block;font-size:13px;color:var(--muted);margin:8px 0 4px}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:80px}
+button.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:none;color:var(--accent);border:1px solid var(--line)}
+button.danger{background:var(--bad);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+.muted{color:var(--muted);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.click{cursor:pointer}tr.click:hover{background:var(--bg)}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--user)}
+.pill.ok{background:var(--ai)}.pill.bad{background:var(--bad);color:#fff}.pill.warn{background:var(--tool)}
+#transcript{height:420px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px}
+.msg{padding:8px 12px;border-radius:10px;max-width:85%;white-space:pre-wrap}
+.msg.user{background:var(--user);align-self:flex-end}.msg.ai{background:var(--ai)}
+.msg.meta{background:var(--tool);font-size:12px;color:var(--muted);align-self:center;max-width:100%}
+.meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.meter>div{height:100%;width:0;background:var(--accent);transition:width .08s}
+.hidden{display:none!important}
+.err{color:var(--bad);font-size:13px;min-height:18px}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+pre{white-space:pre-wrap;font-size:12px;background:var(--bg);padding:8px;border-radius:8px;max-height:240px;overflow:auto}
+@media (max-width:600px){main{padding:12px}.stats{margin-left:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>CallWiz Console</h1>
+  <nav id="nav" class="hidden">
+    <button data-tab="call" class="on">Appeler l'agent</button>
+    <button data-tab="calls">Appels</button>
+    <button data-tab="kb">Connaissances</button>
+    <button data-tab="campaigns">Campagnes</button>
+    <button data-tab="settings">Réglages</button>
+  </nav>
+  <div class="stats" id="stats"></div>
+</header>
+<main>
+  <!-- Connexion -->
+  <section id="login" class="card" style="max-width:420px;margin:40px auto">
+    <h2>Connexion</h2>
+    <label for="email">Email</label><input id="email" type="email" autocomplete="username">
+    <label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password">
+    <p class="err" id="loginErr"></p>
+    <button class="btn" id="loginBtn">Se connecter</button>
+  </section>
+
+  <!-- Appel navigateur -->
+  <section id="tab-call" class="tab hidden">
+    <div class="row">
+      <div class="card" style="flex:2">
+        <div class="flex" style="justify-content:space-between">
+          <h2 style="margin:0">Conversation</h2>
+          <span class="muted" id="callState">Prêt</span>
+        </div>
+        <div id="transcript" aria-live="polite"></div>
+        <div class="flex" style="margin-top:8px">
+          <input id="sayText" placeholder="Taper une réplique (ou parler au micro)…" style="flex:1">
+          <button class="btn ghost" id="sayBtn" disabled>Envoyer</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Appel test</h2>
+        <label for="callMode">Agent</label>
+        <select id="callMode"><option value="">Standard entrant</option></select>
+        <p class="muted">Parle normalement : l'agent répond avec la voix configurée. Un casque évite que la voix de l'agent soit captée par le micro.</p>
+        <label>Niveau micro</label><div class="meter"><div id="meter"></div></div>
+        <div class="flex" style="margin-top:12px">
+          <button class="btn" id="startCall">Démarrer l'appel</button>
+          <button class="btn danger hidden" id="stopCall">Raccrocher</button>
+        </div>
+        <p class="err" id="callErr"></p>
+        <h2 style="margin-top:16px">Mesures</h2>
+        <div id="callMetrics" class="muted">—</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Historique -->
+  <section id="tab-calls" class="tab hidden">
+    <div class="row">
+      <div class="card" style="flex:2"><h2>Derniers appels</h2>
+        <table><thead><tr><th>Date</th><th>Sens</th><th>Statut</th><th>Issue</th><th>Durée</th><th>Coût</th></tr></thead><tbody id="callsBody"></tbody></table>
+      </div>
+      <div class="card" id="callDetail"><h2>Détail</h2><p class="muted">Clique sur un appel.</p></div>
+    </div>
+  </section>
+
+  <!-- Connaissances -->
+  <section id="tab-kb" class="tab hidden">
+    <div class="row">
+      <div class="card"><h2>Bases de connaissances</h2>
+        <div class="flex"><input id="kbName" placeholder="Nom de la nouvelle base"><button class="btn ghost" id="kbCreate">Créer</button></div>
+        <label for="kbSelect">Base</label><select id="kbSelect"></select>
+        <div id="kbDocs" style="margin-top:8px"></div>
+        <label for="kbFile">Ajouter un document (PDF, DOCX, TXT, MD, HTML, CSV)</label>
+        <input id="kbFile" type="file" accept=".pdf,.docx,.txt,.md,.html,.htm,.csv">
+        <label for="kbText">…ou coller du texte (FAQ, tarifs, politique)</label>
+        <textarea id="kbText" placeholder="Q: …&#10;R: …"></textarea>
+        <div class="flex" style="margin-top:8px"><button class="btn" id="kbUpload">Ajouter</button><span class="muted" id="kbMsg"></span></div>
+      </div>
+      <div class="card"><h2>Tester une question</h2>
+        <div class="flex"><input id="kbQuery" placeholder="Quelle est votre politique de retour ?" style="flex:1"><button class="btn" id="kbAsk">Chercher</button></div>
+        <div id="kbResults" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Campagnes -->
+  <section id="tab-campaigns" class="tab hidden">
+    <div class="row">
+      <div class="card" style="flex:2"><h2>Campagnes</h2>
+        <table><thead><tr><th>Nom</th><th>Objectif</th><th>Statut</th><th>Progression</th><th></th></tr></thead><tbody id="campBody"></tbody></table>
+      </div>
+      <div class="card"><h2>Nouvelle campagne</h2>
+        <label for="cName">Nom</label><input id="cName">
+        <label for="cObj">Objectif</label>
+        <select id="cObj"><option value="qualify_lead">Qualifier un prospect</option><option value="confirm_appointment">Confirmer un rendez-vous</option><option value="schedule_meeting">Fixer un rendez-vous</option><option value="request_payment">Relance de paiement</option><option value="collect_feedback">Enquête de satisfaction</option><option value="reactivate_customer">Réactiver un client</option><option value="invite_event">Invitation à un événement</option><option value="custom">Autre</option></select>
+        <label for="cDesc">Détail de l'objectif (variables : {first_name}, …)</label><textarea id="cDesc"></textarea>
+        <label for="cScript">Script</label><textarea id="cScript"></textarea>
+        <label for="cConc">Appels simultanés</label><input id="cConc" type="number" min="1" max="100" value="10">
+        <div class="flex" style="margin-top:8px"><button class="btn" id="cCreate">Créer</button><span class="err" id="cErr"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Réglages -->
+  <section id="tab-settings" class="tab hidden">
+    <div class="row">
+      <div class="card"><h2>Entreprise</h2>
+        <label for="oName">Nom</label><input id="oName">
+        <label for="oDesc">Description de l'activité (utilisée par l'agent)</label><textarea id="oDesc"></textarea>
+        <label for="oTone">Ton</label><input id="oTone">
+        <label for="oTransfer">Numéro de transfert vers un humain (+33…)</label><input id="oTransfer">
+        <label for="oVoice">Voix</label><select id="oVoice"></select>
+        <div class="flex" style="margin-top:12px"><button class="btn" id="oSave">Enregistrer</button><span class="muted" id="oMsg"></span></div>
+      </div>
+      <div class="card"><h2>Système</h2><pre id="health"></pre>
+        <button class="btn ghost" id="logout">Se déconnecter</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const API = location.origin + "/api/v1";
+const WSB = location.origin.replace(/^http/, "ws");
+const $ = (id) => document.getElementById(id);
+let token = null;
+try { token = localStorage.getItem("cw_token"); } catch (e) {}
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v); }
+  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(k ?? ""));
+  return n;
+}
+async function api(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  if (token) headers.Authorization = "Bearer " + token;
+  if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(opts.json); }
+  const r = await fetch(API + path, { method: opts.method || "GET", headers, body: opts.body });
+  if (r.status === 401) { logout(); throw new Error("Session expirée"); }
+  if (r.status === 204) return null;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data.error && data.error.message) || r.statusText);
+  return data;
+}
+const fmtDate = (s) => new Date(s).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+const pill = (txt) => { const cls = /completed|success|ready|running/.test(txt) ? "ok" : /failed|opted_out/.test(txt) ? "bad" : /paused|pending|processing|voicemail|transferred/.test(txt) ? "warn" : ""; return el("span", { class: "pill " + cls }, txt || "—"); };
+
+// ------------------------------------------------------------------ auth
+$("loginBtn").onclick = async () => {
+  $("loginErr").textContent = "";
+  try {
+    const r = await fetch(API + "/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error((d.error && d.error.message) || "Échec de connexion");
+    token = d.access_token; try { localStorage.setItem("cw_token", token); } catch (e) {}
+    boot();
+  } catch (e) { $("loginErr").textContent = e.message; }
+};
+$("password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+function logout() { token = null; try { localStorage.removeItem("cw_token"); } catch (e) {} location.reload(); }
+$("logout").onclick = logout;
+
+// ------------------------------------------------------------------ navigation
+document.querySelectorAll("#nav button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+function showTab(name) {
+  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("hidden", t.id !== "tab-" + name));
+  ({ calls: loadCalls, kb: loadKbs, campaigns: loadCampaigns, settings: loadSettings, call: loadCallModes }[name] || (() => {}))();
+}
+
+// ------------------------------------------------------------------ temps réel
+let callsWs = null, currentCallId = null;
+function connectRealtime() {
+  const a = new WebSocket(WSB + "/ws/analytics?token=" + encodeURIComponent(token));
+  a.onmessage = (m) => { const e = JSON.parse(m.data); if (e.event === "analytics.updated") renderStats(e.payload); };
+  a.onclose = () => setTimeout(() => token && connectRealtime(), 3000);
+  callsWs = new WebSocket(WSB + "/ws/calls?token=" + encodeURIComponent(token));
+  callsWs.onmessage = (m) => onCallEvent(JSON.parse(m.data));
+}
+function renderStats(p) {
+  const s = $("stats"); s.replaceChildren();
+  const add = (k, v) => s.append(el("span", {}, k + " ", el("b", {}, String(v ?? "—"))));
+  add("Actifs", p.active_calls); add("Aujourd'hui", p.calls_today); add("Coût", (p.cost_today ?? 0).toFixed(3) + " €"); add("Latence moy.", p.avg_latency_ms ? Math.round(p.avg_latency_ms) + " ms" : "—");
+}
+const latencies = [];
+let pendingUser = null;
+function onCallEvent(e) {
+  if (!currentCallId || e.call_id !== currentCallId) return;
+  const p = e.payload || {};
+  if (e.event === "call.transcript_partial" && p.role === "user") {
+    // affichage immédiat de ce que l'appelant dit, complété au fil de la reconnaissance
+    if (!pendingUser) { pendingUser = el("div", { class: "msg user", style: "opacity:.75" }, ""); $("transcript").append(pendingUser); }
+    pendingUser.textContent = (pendingUser.textContent + " " + p.text).trim(); $("transcript").scrollTop = $("transcript").scrollHeight;
+  }
+  else if (e.event === "call.transcript_final") {
+    if (pendingUser) { pendingUser.textContent = p.text; pendingUser.style.opacity = "1"; pendingUser = null; } else addMsg("user", p.text);
+  }
+  else if (e.event === "call.response_generated") addMsg("ai", p.text + (p.interrupted ? " ⏸" : ""));
+  else if (e.event === "call.tool_called") addMsg("meta", "Outil " + p.tool + " " + JSON.stringify(p.args || {}) + (p.duration_ms != null ? " · " + p.duration_ms + " ms" : ""));
+  else if (e.event === "call.agent_decision" && p.decision !== "route" && p.decision !== "session_started") addMsg("meta", "Superviseur : " + p.decision + (p.reason ? " (" + p.reason + ")" : ""));
+  else if (e.event === "call.user_interrupted") addMsg("meta", "Interruption : l'agent s'est tu");
+  else if (e.event === "call.latency") { latencies.push(p.voice_to_voice_ms); renderMetrics(); }
+  else if (/call\.(completed|failed|transferred)/.test(e.event)) addMsg("meta", "Fin : " + (p.outcome || p.status) + (p.summary ? " — " + p.summary : "") + (p.cost_estimate != null ? " · " + p.cost_estimate.toFixed(4) + " €" : ""));
+}
+function addMsg(kind, text) { const t = $("transcript"); t.append(el("div", { class: "msg " + kind }, text)); t.scrollTop = t.scrollHeight; }
+function renderMetrics() {
+  if (!latencies.length) { $("callMetrics").textContent = "—"; return; }
+  const s = [...latencies].sort((a, b) => a - b);
+  $("callMetrics").textContent = "Voix→voix : dernière " + Math.round(latencies[latencies.length - 1]) + " ms · médiane " + Math.round(s[Math.floor(s.length / 2)]) + " ms · " + s.length + " tours";
+}
+
+// ------------------------------------------------------------------ appel navigateur
+let ws = null, micCtx = null, playCtx = null, stream = null, nextT = 0, sources = [];
+const WORKLET = "class Cap extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('cap',Cap)";
+async function loadCallModes() {
+  const sel = $("callMode"); if (sel.dataset.loaded) return;
+  try { const c = await api("/campaigns?limit=50"); for (const x of c.items) sel.append(el("option", { value: x.id }, "Campagne : " + x.name)); sel.dataset.loaded = "1"; } catch (e) {}
+}
+$("startCall").onclick = async () => {
+  $("callErr").textContent = ""; $("transcript").replaceChildren(); latencies.length = 0; renderMetrics();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  } catch (e) { stream = null; $("callErr").textContent = "Micro indisponible (" + e.message + ") : mode texte, tape tes répliques."; }
+  playCtx = new AudioContext(); nextT = 0; sources = [];
+  if (stream) await startMic();
+  openCallSocket();
+};
+async function startMic() {
+  micCtx = new AudioContext();
+  await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+  const src = micCtx.createMediaStreamSource(stream), node = new AudioWorkletNode(micCtx, "cap"), mute = micCtx.createGain();
+  mute.gain.value = 0; src.connect(node); node.connect(mute); mute.connect(micCtx.destination);
+  const ratio = micCtx.sampleRate / 16000; let pending = new Float32Array(0);
+  node.port.onmessage = (ev) => {
+    const merged = new Float32Array(pending.length + ev.data.length); merged.set(pending); merged.set(ev.data, pending.length); pending = merged;
+    const need = Math.floor(640 * ratio);
+    while (pending.length >= need) {
+      const chunk = pending.subarray(0, need); pending = pending.slice(need);
+      const out = new Int16Array(640); let peak = 0;
+      for (let i = 0; i < 640; i++) { const v = chunk[Math.min(chunk.length - 1, Math.floor(i * ratio))]; peak = Math.max(peak, Math.abs(v)); out[i] = Math.max(-1, Math.min(1, v)) * 0x7fff; }
+      $("meter").style.width = Math.min(100, peak * 140) + "%";
+      if (ws && ws.readyState === 1) ws.send(out.buffer);
+    }
+  };
+}
+function openCallSocket() {
+  const mode = $("callMode").value;
+  ws = new WebSocket(WSB + "/ws/webcall?token=" + encodeURIComponent(token) + (mode ? "&campaign_id=" + mode : ""));
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (m) => {
+    if (m.data instanceof ArrayBuffer) return play(m.data);
+    const d = JSON.parse(m.data);
+    if (d.type === "call") { currentCallId = d.call_id; $("callState").textContent = "En communication"; }
+    else if (d.type === "clear") stopPlayback();
+    else if (d.type === "error") { $("callErr").textContent = (d.payload && d.payload.message) || "Erreur"; }
+    else if (d.type === "ended") endCall(false);
+  };
+  ws.onclose = () => endCall(false);
+  $("startCall").classList.add("hidden"); $("stopCall").classList.remove("hidden"); $("sayBtn").disabled = false; $("callState").textContent = "Connexion…";
+}
+function play(ab) {
+  const i16 = new Int16Array(ab); if (!i16.length) return;
+  const buf = playCtx.createBuffer(1, i16.length, 24000), ch = buf.getChannelData(0);
+  for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 0x8000;
+  const s = playCtx.createBufferSource(); s.buffer = buf; s.connect(playCtx.destination);
+  const t = Math.max(playCtx.currentTime + 0.03, nextT); s.start(t); nextT = t + buf.duration;
+  sources.push(s); s.onended = () => { sources = sources.filter((x) => x !== s); };
+}
+function stopPlayback() { for (const s of sources) { try { s.stop(); } catch (e) {} } sources = []; nextT = 0; }
+function endCall(sendHangup) {
+  if (sendHangup && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "hangup" }));
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  if (micCtx) micCtx.close().catch(() => {});
+  setTimeout(() => { if (playCtx && !sources.length) playCtx.close().catch(() => {}); }, 4000);
+  stream = null; micCtx = null; $("meter").style.width = "0";
+  $("startCall").classList.remove("hidden"); $("stopCall").classList.add("hidden"); $("sayBtn").disabled = true; $("callState").textContent = "Terminé";
+}
+$("stopCall").onclick = () => endCall(true);
+$("sayBtn").onclick = () => { const t = $("sayText").value.trim(); if (!t || !ws || ws.readyState !== 1) return; ws.send(JSON.stringify({ type: "text", text: t })); $("sayText").value = ""; };
+$("sayText").addEventListener("keydown", (e) => { if (e.key === "Enter") $("sayBtn").click(); });
+
+// ------------------------------------------------------------------ historique
+async function loadCalls() {
+  const body = $("callsBody"); body.replaceChildren();
+  const d = await api("/calls?limit=50");
+  for (const c of d.items) {
+    body.append(el("tr", { class: "click", onclick: () => showCall(c.id) },
+      el("td", {}, fmtDate(c.created_at)), el("td", {}, c.direction === "inbound" ? "Entrant" : "Sortant"), el("td", {}, pill(c.status)),
+      el("td", {}, c.outcome || "—"), el("td", {}, c.duration_seconds + " s"), el("td", {}, c.cost_estimate.toFixed(4) + " €")));
+  }
+  if (!d.items.length) body.append(el("tr", {}, el("td", { colspan: "6", class: "muted" }, "Aucun appel pour l'instant.")));
+}
+async function showCall(id) {
+  const box = $("callDetail"); box.replaceChildren(el("h2", {}, "Détail"), el("p", { class: "muted" }, "Chargement…"));
+  const d = await api("/calls/" + id + "/debug"), c = d.call;
+  box.replaceChildren(el("h2", {}, "Détail de l'appel"),
+    el("p", {}, pill(c.status), " ", c.outcome || "", " · intention ", c.intent || "—", " · sentiment ", c.sentiment != null ? c.sentiment.toFixed(2) : "—"),
+    el("p", { class: "muted" }, c.summary || ""),
+    el("p", { class: "muted" }, "Latence moyenne " + (c.latency.avg_ms ?? "—") + " ms · p95 " + (c.latency.p95_ms ?? "—") + " ms · coût " + c.cost_estimate.toFixed(4) + " €"));
+  const t = el("div", { style: "display:flex;flex-direction:column;gap:6px;margin-top:8px" });
+  for (const m of c.transcript || []) t.append(el("div", { class: "msg " + (m.role === "user" ? "user" : "ai") }, m.text));
+  box.append(t);
+  if (d.decisions.length) { box.append(el("h2", { style: "margin-top:12px" }, "Décisions des agents")); for (const x of d.decisions) box.append(el("div", { class: "muted" }, x.agent + " → " + x.decision + (x.reason ? " : " + x.reason : ""))); }
+  if (c.error) box.append(el("p", { class: "err" }, c.error));
+}
+
+// ------------------------------------------------------------------ connaissances
+async function loadKbs() {
+  const sel = $("kbSelect"), keep = sel.value; sel.replaceChildren();
+  const kbs = await api("/knowledge-bases");
+  for (const k of kbs) sel.append(el("option", { value: k.id }, k.name));
+  if (keep) sel.value = keep;
+  if (kbs.length) loadDocs();
+}
+$("kbSelect").onchange = loadDocs;
+async function loadDocs() {
+  const id = $("kbSelect").value; if (!id) return;
+  const kb = await api("/knowledge-bases/" + id), box = $("kbDocs"); box.replaceChildren();
+  for (const d of kb.documents) box.append(el("div", { class: "flex" }, pill(d.status), d.filename, el("span", { class: "muted" }, d.chunk_count + " extraits"), d.error ? el("span", { class: "err" }, d.error) : ""));
+  if (!kb.documents.length) box.append(el("p", { class: "muted" }, "Aucun document."));
+  if (kb.documents.some((d) => d.status === "pending" || d.status === "processing")) setTimeout(loadDocs, 1500);
+}
+$("kbCreate").onclick = async () => { const n = $("kbName").value.trim(); if (!n) return; const kb = await api("/knowledge-bases", { method: "POST", json: { name: n } }); $("kbName").value = ""; await loadKbs(); $("kbSelect").value = kb.id; loadDocs(); };
+$("kbUpload").onclick = async () => {
+  const id = $("kbSelect").value; if (!id) { $("kbMsg").textContent = "Crée d'abord une base."; return; }
+  try {
+    if ($("kbFile").files[0]) { const fd = new FormData(); fd.append("file", $("kbFile").files[0]); await api("/knowledge-bases/" + id + "/documents", { method: "POST", body: fd }); $("kbFile").value = ""; }
+    if ($("kbText").value.trim()) { await api("/knowledge-bases/" + id + "/documents/text", { method: "POST", json: { filename: "note.md", content: $("kbText").value } }); $("kbText").value = ""; }
+    $("kbMsg").textContent = "Ajouté, indexation en cours…"; loadDocs();
+  } catch (e) { $("kbMsg").textContent = e.message; }
+};
+$("kbAsk").onclick = async () => {
+  const id = $("kbSelect").value, q = $("kbQuery").value.trim(); if (!id || !q) return;
+  const r = await api("/knowledge-bases/" + id + "/test-query", { method: "POST", json: { query: q, top_k: 3 } }), box = $("kbResults");
+  box.replaceChildren(el("p", { class: "muted" }, (r.low_confidence ? "⚠ Confiance faible : l'agent dira qu'il ne sait pas. " : "✓ Réponse trouvée. ") + Math.round(r.latency_ms) + " ms"));
+  for (const c of r.chunks) box.append(el("pre", {}, c.content));
+};
+$("kbQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") $("kbAsk").click(); });
+
+// ------------------------------------------------------------------ campagnes
+async function loadCampaigns() {
+  const body = $("campBody"); body.replaceChildren();
+  const d = await api("/campaigns?limit=100");
+  for (const c of d.items) {
+    const prog = el("span", { class: "muted" }, "…");
+    api("/campaigns/" + c.id + "/progress").then((p) => prog.textContent = p.percent + " % · " + p.completed + "/" + p.total_contacts + " · " + p.success_count + " succès").catch(() => prog.textContent = "—");
+    const file = el("input", { type: "file", accept: ".csv", class: "hidden" });
+    file.onchange = async () => { const fd = new FormData(); fd.append("file", file.files[0]); try { const r = await api("/campaigns/" + c.id + "/contacts/import", { method: "POST", body: fd }); alert(r.imported + " contacts importés, " + r.skipped + " ignorés"); loadCampaigns(); } catch (e) { alert(e.message); } };
+    const act = (label, path, cls = "ghost") => el("button", { class: "btn " + cls, onclick: async () => { try { await api("/campaigns/" + c.id + path, { method: "POST" }); loadCampaigns(); } catch (e) { alert(e.message); } } }, label);
+    body.append(el("tr", {}, el("td", {}, c.name), el("td", {}, c.objective), el("td", {}, pill(c.status)), el("td", {}, prog),
+      el("td", {}, el("div", { class: "flex" }, el("button", { class: "btn ghost", onclick: () => file.click() }, "Importer CSV"), file,
+        c.status === "running" ? act("Pause", "/pause") : act("Lancer", "/start", ""), act("Stop", "/stop")))));
+  }
+  if (!d.items.length) body.append(el("tr", {}, el("td", { colspan: "5", class: "muted" }, "Aucune campagne.")));
+}
+$("cCreate").onclick = async () => {
+  $("cErr").textContent = "";
+  try {
+    await api("/campaigns", { method: "POST", json: { name: $("cName").value, objective: $("cObj").value, objective_description: $("cDesc").value, script: $("cScript").value, max_concurrency: Number($("cConc").value) || 10 } });
+    $("cName").value = $("cDesc").value = $("cScript").value = ""; loadCampaigns(); $("callMode").dataset.loaded = "";
+  } catch (e) { $("cErr").textContent = e.message; }
+};
+
+// ------------------------------------------------------------------ réglages
+async function loadSettings() {
+  const [o, v, h] = await Promise.all([api("/organizations/me"), api("/organizations/voices"), fetch(location.origin + "/health").then((r) => r.json())]);
+  $("oName").value = o.name; $("oDesc").value = o.business_description; $("oTone").value = o.tone; $("oTransfer").value = o.transfer_number || "";
+  const sel = $("oVoice"); sel.replaceChildren();
+  for (const x of v.voices) sel.append(el("option", { value: x.name }, x.style.includes("—") ? x.style : x.name + " — " + x.style));
+  sel.value = o.default_voice_id || v.default_voice;
+  $("health").textContent = JSON.stringify(h, null, 2);
+}
+$("oSave").onclick = async () => {
+  try {
+    await api("/organizations/me", { method: "PATCH", json: { name: $("oName").value, business_description: $("oDesc").value, tone: $("oTone").value, transfer_number: $("oTransfer").value || null, default_voice_id: $("oVoice").value } });
+    $("oMsg").textContent = "Enregistré ✓";
+  } catch (e) { $("oMsg").textContent = e.message; }
+};
+
+// ------------------------------------------------------------------ démarrage
+async function boot() {
+  try { await api("/auth/me"); } catch (e) { return; }
+  $("login").classList.add("hidden"); $("nav").classList.remove("hidden");
+  connectRealtime(); showTab("call");
+}
+if (token) boot();
+</script>
+</body>
+</html>

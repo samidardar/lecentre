@@ -167,16 +167,23 @@ class CampaignDispatcher:
                         and_(Contact.status == ContactStatus.retry.value, or_(Contact.next_attempt_at.is_(None), Contact.next_attempt_at <= now))),
                 ).order_by(Contact.created_at).limit(slots)
             )).all()
+            # Contacts marqués et appels créés dans UNE transaction (au lieu d'un commit par appel).
+            calls: list[Call] = []
             for c in contacts:
                 c.status, c.attempts = ContactStatus.calling.value, c.attempts + 1
-            from_number = camp.from_number or ""
+                calls.append(Call(organization_id=org_id, direction="outbound", from_number=camp.from_number or "",
+                                  to_number=c.phone, campaign_id=campaign_id, contact_id=c.id,
+                                  provider=self.calls.telephony.name, status=CallStatus.queued.value))
+            db.add_all(calls)
             await db.commit()
-        for c in contacts:
-            await self._bucket.take()
-            call = await self.calls.create_call(organization_id=org_id, direction="outbound", from_number=from_number,
-                                                to_number=c.phone, campaign_id=campaign_id, contact_id=c.id)
+        for call in calls:
             self._active.setdefault(campaign_id, set()).add(call.id)
-            self._call_to_contact[call.id] = (campaign_id, c.id)
+            self._call_to_contact[call.id] = (campaign_id, call.contact_id)  # type: ignore[assignment]
+        for call in calls:
+            await ev.emit(ev.CALL_STARTED, org_id, call_id=call.id, campaign_id=campaign_id, direction="outbound",
+                          status=call.status, from_number=call.from_number, to_number=call.to_number,
+                          contact_id=str(call.contact_id))
+            await self._bucket.take()  # débit maximal vers l'opérateur
             asyncio.create_task(self.calls.dial(call))
         return len(contacts)
 

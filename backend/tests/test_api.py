@@ -144,3 +144,9 @@ async def test_voices_and_french_defaults(client: httpx.AsyncClient, auth: dict[
     bad = await client.patch("/api/v1/organizations/me", headers=auth, json={"default_voice_id": "Robot"})
     assert bad.status_code == 422
     assert (await client.post("/api/v1/campaigns", headers=auth, json={"name": "x", "language": "de"})).status_code == 422
+
+
+async def test_console_is_served(client: httpx.AsyncClient) -> None:
+    r = await client.get("/console")
+    assert r.status_code == 200 and "CallWiz Console" in r.text and "/ws/webcall" in r.text
+    assert (await client.get("/", follow_redirects=False)).headers["location"] == "/console"
