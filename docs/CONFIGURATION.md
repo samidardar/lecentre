@@ -1,14 +1,15 @@
 # Configuration : APIs, `.env`, français et voix
 
 > **Pipeline par défaut depuis le 30/09/2026 : « cascade »** — Deepgram Nova-3 (transcription streaming, français)
-> → Claude Haiku 4.5 (conversation, outils) → Fish Audio (voix, WebSocket streaming). `LIVE_PROVIDER=cascade`.
+> → LLM via OpenRouter, Claude Haiku 5.5 par défaut (conversation, outils) → Fish Audio (voix, WebSocket streaming). `LIVE_PROVIDER=cascade`.
 > Gemini Live reste disponible en option (`LIVE_PROVIDER=gemini`), décrit plus bas.
 
 ## 0. Clés du pipeline cascade
 
 | Service | Usage | Où | Variables |
 |---|---|---|---|
-| **Anthropic (Claude)** | Conversation temps réel + analyse de fin d'appel | console.anthropic.com → API Keys | `ANTHROPIC_API_KEY` (+ `ANTHROPIC_WORKSPACE_ID` si la clé n'est rattachée à aucun workspace) |
+| **OpenRouter** | Conversation temps réel + analyse de fin d'appel (modèle `anthropic/claude-haiku-5.5`, secours `anthropic/claude-haiku-4.5`) | openrouter.ai → Keys (+ crédit) | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_FALLBACK_MODELS` |
+| Anthropic (option) | Même rôle en direct, `LLM_PROVIDER=anthropic` | console.anthropic.com | `ANTHROPIC_API_KEY` (+ `ANTHROPIC_WORKSPACE_ID`) |
 | **Deepgram** | Transcription en streaming de l'appelant | console.deepgram.com → API Keys | `DEEPGRAM_API_KEY` |
 | **Fish Audio** | Voix de l'agent | fish.audio/app/developers (crédit API séparé du crédit plateforme) | `FISH_API_KEY`, `FISH_VOICE_ID` |
 | **Twilio** | Téléphonie | console.twilio.com | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_DEFAULT_FROM` |
@@ -16,6 +17,8 @@
 Voix Fish Audio françaises présélectionnées (aucune n'imite une personne réelle) : `GET /api/v1/organizations/voices`
 ou `backend/app/core/languages.py` (`FISH_FR_VOICES`). Une voix se règle par numéro, campagne ou organisation
 (`voice_id` = reference_id Fish de 32 caractères) ou globalement (`FISH_VOICE_ID`).
+
+Vérification : `callwiz doctor` (ajoutez `--live` pour mesurer la latence réelle du LLM et tester la voix).
 
 Latence (mesurée) : ouverture WebSocket Fish ≈ 0,9 s (préouverte entre deux tours, donc invisible) ; premier son
 ≈ 0,8 s après le texte sur `s2.1-pro-free`. Le texte part vers la voix phrase par phrase, dès la première phrase.

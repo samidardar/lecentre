@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -114,6 +114,15 @@ class Settings(BaseSettings):
 
     # --- MCP ---
     mcp_servers_json: str = Field(default="{}", description="{name: {command, args} | {url}}")
+
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, v: str) -> str:
+        """Les hébergeurs (Render, Railway, Heroku…) fournissent postgres:// ; SQLAlchemy async veut +asyncpg."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+asyncpg://" + v[len(prefix):]
+        return v
 
     @property
     def is_sqlite(self) -> bool:

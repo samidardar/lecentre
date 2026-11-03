@@ -8,7 +8,7 @@ COPY backend/alembic backend/alembic
 COPY backend/alembic.ini backend/
 COPY examples examples
 COPY mcp mcp
-RUN pip install "./backend[prod,docs,mcp,embeddings]"
+RUN pip install "./backend[prod,docs,mcp,embeddings,anthropic]"
 WORKDIR /srv/backend
 RUN useradd -m callwiz && mkdir -p /data && chown callwiz /data
 USER callwiz

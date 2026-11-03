@@ -453,5 +453,41 @@ def gdpr_purge(days: Optional[int] = None) -> None:
     echo_json(run(main()))
 
 
+# ------------------------------------------------------------------ exploitation
+twilio_app = typer.Typer(help="Téléphonie Twilio")
+app.add_typer(twilio_app, name="twilio")
+
+
+@app.command()
+def doctor(live: bool = typer.Option(False, help="Tests réels (petit coût) : latence LLM et synthèse Fish")) -> None:
+    """Vérifie toutes les clés et tous les services, avec la marche à suivre si quelque chose manque."""
+    from cli.ops import print_checks, run_checks
+
+    from app.core.config import get_settings
+
+    failures = print_checks(run(run_checks(get_settings(), live=live)))
+    raise typer.Exit(1 if failures else 0)
+
+
+@twilio_app.command("connect")
+def twilio_connect_cmd(number: Optional[str] = typer.Option(None, help="Numéro à relier (+…) ; défaut : le premier du compte")) -> None:
+    """Relie un numéro Twilio au serveur (webhook voix sur PUBLIC_BASE_URL) et l'enregistre comme numéro entrant."""
+    from cli.ops import twilio_connect
+
+    from app.core.config import get_settings
+
+    num = run(twilio_connect(get_settings(), number))
+    typer.echo(f"✓ {num} relié à {get_settings().public_base_url}/telephony/twilio/voice")
+
+
+@app.command()
+def up(port: int = 8000, tunnel: bool = typer.Option(True, help="Ouvre un tunnel HTTPS public (cloudflared)"),
+       twilio: bool = typer.Option(True, help="Relie automatiquement le numéro Twilio")) -> None:
+    """Tout-en-un : tunnel public + PUBLIC_BASE_URL à jour + numéro Twilio relié + serveur."""
+    from cli.ops import up as do_up
+
+    do_up(port=port, tunnel=tunnel, connect_twilio=twilio)
+
+
 if __name__ == "__main__":
     app()

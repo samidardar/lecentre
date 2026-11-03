@@ -1,21 +1,19 @@
 # CallWiz AI — centre d'appels IA temps réel
 
-Plateforme SaaS B2B : **standard téléphonique IA (inbound)** et **campagnes d'appels sortants (outbound)** avec voix native
-**Gemini Live**, orchestration **LangGraph**, **RAG** hybride sur les documents du client, supervision qualité et analytics temps réel.
+Plateforme SaaS B2B : **standard téléphonique IA (inbound)** et **campagnes d'appels sortants (outbound)** en français
+naturel. Pipeline vocal **Deepgram (écoute) → LLM via OpenRouter (Claude Haiku 5.5 par défaut) → Fish Audio (voix)**,
+orchestration **LangGraph**, **RAG** hybride sur les documents du client, supervision qualité, analytics temps réel,
+**console web intégrée** et **appel test depuis le navigateur**.
 
 ```
-Frontend (Lovable) ──REST /api/v1 + WebSocket /ws/*──▶ FastAPI
-                                                      │
-        Twilio (PSTN) ◀─Media Streams µ-law 8k─▶ CallSession ◀─audio PCM 16k/24k─▶ Gemini Live (gemini-3.8-live)
-                                                      │  transcriptions · tool calls · interruptions
-                                LangGraph (plan de contrôle) : call_plan · tool · turn · post_call
-                                   │ Supervisor · Inbound · Outbound · Analytics agents
-                                   ├── RAG : Qdrant (embarqué ou cluster) + BM25 + RRF, fastembed
-                                   ├── Outils : KB, RDV, message, transfert, CRM, MCP servers
-                                   └── Bus d'événements (mémoire | Redis) → Analytics → WebSocket → dashboard
+Téléphone (Twilio) ─┐                                   ┌─ Deepgram Nova-3 (transcription streaming)
+Navigateur (micro) ─┼─▶ CallSession (1 tâche / appel) ──┼─ LLM OpenRouter (streaming + outils)
+                    │    LangGraph : plan · outils ·    └─ Fish Audio (voix streaming, préouverte)
+Console /console ◀──┘    supervision · analyse finale
+                         RAG (Qdrant + BM25) · bus d'événements → analytics → WebSocket
 ```
 
-📄 **Rapport complet : [REPORT.md](REPORT.md)** — architecture, choix, résultats de tests et de charge, limites, feuille de route.
+📄 **Rapport complet : [REPORT.md](REPORT.md)** · ⚙️ **Clés et `.env` : [docs/CONFIGURATION.md](docs/CONFIGURATION.md)**
 
 ## Démarrage rapide (sans Docker, sans clé API)
 
@@ -23,30 +21,33 @@ Frontend (Lovable) ──REST /api/v1 + WebSocket /ws/*──▶ FastAPI
 python -m venv backend/.venv
 backend/.venv/Scripts/python -m pip install -e "backend[dev,docs,mcp,embeddings]"   # Linux/macOS : backend/.venv/bin/…
 cd backend
-callwiz init                 # crée .env (secret JWT aléatoire)
+callwiz init          # crée .env (secret JWT aléatoire)
 callwiz db migrate
-callwiz db seed              # org démo « VéloCity Paris » + FAQ + numéro + campagne de 20 contacts
-callwiz call test --agent inbound      # conversation simulée affichée en direct (outils, latences)
-callwiz rag query "Quelle est votre politique de retour ?"
-callwiz loadtest --calls 100           # 100 appels simultanés (mock) : 0 échec, p95 ≈ latence du modèle
-callwiz dev                            # API sur http://localhost:8000 — docs : /docs
+callwiz db seed       # org démo « VéloCity Paris » + FAQ + numéro + campagne de 20 contacts
+callwiz dev           # puis ouvrez http://localhost:8000/console
 ```
 
-Par défaut tout est **simulé** (`LIVE_PROVIDER=mock`, `TELEPHONY_PROVIDER=mock`) : SQLite, bus mémoire, Qdrant embarqué.
-Identifiants de la démo : voir `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` dans [.env.example](.env.example).
+Par défaut tout est **simulé** (`LIVE_PROVIDER=mock`, `TELEPHONY_PROVIDER=mock`) : la console, les appels navigateur,
+les campagnes et les analytics fonctionnent sans aucune clé. Identifiants de la démo : `SEED_ADMIN_EMAIL` /
+`SEED_ADMIN_PASSWORD` dans [.env.example](.env.example).
 
 ## Passer en réel
-```
-LIVE_PROVIDER=gemini          GEMINI_API_KEY=…
-TELEPHONY_PROVIDER=twilio     TWILIO_ACCOUNT_SID=…  TWILIO_AUTH_TOKEN=…  TWILIO_DEFAULT_FROM=+33…
-PUBLIC_BASE_URL=https://<tunnel-ou-domaine>
-```
-Puis `callwiz call test --to +336XXXXXXXX` pour recevoir l'agent sur votre téléphone. Détails : [docs/TELEPHONY.md](docs/TELEPHONY.md).
-Production (PostgreSQL + Redis + Qdrant + worker) : `docker compose up --build`.
+
+1. Renseignez dans `backend/.env` : `OPENROUTER_API_KEY`, `DEEPGRAM_API_KEY`, `FISH_API_KEY`, `TWILIO_ACCOUNT_SID`,
+   `TWILIO_AUTH_TOKEN`, puis `LIVE_PROVIDER=cascade` et `TELEPHONY_PROVIDER=twilio`.
+2. `callwiz doctor` — vérifie chaque clé et service et dit quoi faire s'il manque quelque chose (`--live` : mesure la
+   latence réelle du LLM et teste la synthèse vocale).
+3. `callwiz up` — ouvre un tunnel HTTPS public (cloudflared dans `tools/`), met à jour `PUBLIC_BASE_URL`, relie votre
+   numéro Twilio au serveur et démarre l'API. Appelez votre numéro, ou testez au micro dans `/console`.
+
+Hébergement : [render.yaml](render.yaml) (Render, API + PostgreSQL en un clic) ou `docker compose up --build`.
 
 ## Commandes CLI
 | Commande | Rôle |
 |---|---|
+| `callwiz up` | tunnel public + numéro Twilio relié + serveur, en une commande |
+| `callwiz doctor [--live]` | diagnostic de toutes les clés et de tous les services |
+| `callwiz twilio connect [--number +…]` | relie un numéro Twilio au serveur |
 | `callwiz dev` / `callwiz worker` | API complète / dispatcher de campagnes seul (scale-out) |
 | `callwiz db migrate` · `db seed` | migrations Alembic · données de démo |
 | `callwiz campaign create/list/launch --file contacts.csv --concurrency 100/pause/stop` | campagnes |

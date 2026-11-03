@@ -1,0 +1,49 @@
+# Déploiement Render (render.com → New → Blueprint → ce dépôt).
+# Crée l'API (Docker) + PostgreSQL. Les clés se saisissent dans le tableau de bord Render (sync: false).
+databases:
+  - name: callwiz-db
+    plan: basic-256mb
+    databaseName: callwiz
+    user: callwiz
+
+services:
+  - type: web
+    name: callwiz-api
+    runtime: docker
+    dockerfilePath: docker/Dockerfile.backend
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: callwiz-data
+      mountPath: /data
+      sizeGB: 2
+    envVars:
+      - key: ENVIRONMENT
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase: { name: callwiz-db, property: connectionString }
+      - key: JWT_SECRET
+        generateValue: true
+      - key: LIVE_PROVIDER
+        value: cascade
+      - key: LLM_PROVIDER
+        value: openrouter
+      - key: TELEPHONY_PROVIDER
+        value: twilio
+      - key: VECTOR_STORE
+        value: qdrant_local
+      - key: PUBLIC_BASE_URL
+        sync: false   # ex. https://callwiz-api.onrender.com
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: FISH_API_KEY
+        sync: false
+      - key: FISH_VOICE_ID
+        value: 5567200c7d8341738f0892bbacd3be3c
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
