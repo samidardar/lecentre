@@ -26,7 +26,7 @@ from app.db import session_factory
 from app.live import get_live_model
 from app.live.base import (
     AudioOut, InputTranscript, Interrupted, LiveConfig, LiveSession, OutputTranscript, SessionEnded, ToolCall,
-    TurnComplete, Usage,
+    TurnComplete, TurnMetrics, Usage,
 )
 from app.models import Call, CallStatus
 from app.voice.audio import EnergyVAD
@@ -60,6 +60,7 @@ class CallSession:
         self._awaiting_first_audio = False
         self._last_activity = time.monotonic()
         self._latencies: list[float] = []
+        self._turn_metrics: list[dict[str, Any]] = []
         self._first_audio_at: float | None = None
         self._bg: set[asyncio.Task[Any]] = set()
         self._kicked_off = False
@@ -82,6 +83,7 @@ class CallSession:
                 system_instruction=self.plan.instructions, voice=self.plan.voice, language=ctx.language,
                 tools=declarations(self.plan.tools),
                 greeting_hint=self.plan.greeting,
+                context_provider=self._knowledge_context if "search_knowledge_base" in self.plan.tools else None,
             ))
             await record_decision(ctx, self.plan.agent, "session_started", f"agent={self.plan.agent}", tools=self.plan.tools)
             if ctx.direction == "inbound" or self._voicemail_pending:
@@ -213,6 +215,9 @@ class CallSession:
                 await self._handle_tools(event)
             elif isinstance(event, TurnComplete):
                 await self._on_turn_complete()
+            elif isinstance(event, TurnMetrics):
+                self._turn_metrics.append(event.data)
+                self._spawn(ev.emit(ev.CALL_LATENCY, ctx.organization_id, call_id=self.call_id, breakdown=event.data))
             elif isinstance(event, Usage):
                 self.rt.usage["input_tokens"] += event.input_tokens
                 self.rt.usage["output_tokens"] += event.output_tokens
@@ -351,7 +356,12 @@ class CallSession:
             "voice_to_voice_ms": [round(x * 1000, 1) for x in lat[:200]],
             "avg_ms": round(sum(lat) / len(lat) * 1000, 1) if lat else None,
             "p95_ms": round(lat[min(len(lat) - 1, int(len(lat) * 0.95))] * 1000, 1) if lat else None,
+            "turns": self._turn_metrics[:100],
         }
+        for key in ("llm_ttft_ms", "tts_ttfb_ms", "first_audio_ms"):
+            vals = sorted(m[key] for m in self._turn_metrics if m.get(key) is not None and m.get("source") == "llm")
+            if vals:
+                latency[f"{key}_median"] = vals[len(vals) // 2]
         try:
             await get_graphs().post_call.ainvoke({
                 "rt": self.rt, "final_status": self.final_status, "answered": self.answered_at is not None,
@@ -359,6 +369,23 @@ class CallSession:
             })
         except Exception:
             logger.exception("post_call en échec")
+
+    async def _knowledge_context(self, text: str) -> str:
+        """Recherche anticipée : extraits de la base joints au message de l'appelant (voir CascadeLiveSession)."""
+        from app.rag.service import get_rag
+
+        assert self.rt is not None
+        ctx = self.rt.ctx
+        res = await get_rag().search(ctx.organization_id, text, ctx.knowledge_base_ids or None, top_k=3)
+        if not res.hits:
+            return ""
+        hits = [h.as_dict() for h in res.hits]
+        self.rt.rag_hits.extend(hits)  # sert aussi au contrôle anti-invention du Supervisor
+        self._spawn(ev.emit(ev.CALL_TOOL_CALLED, ctx.organization_id, call_id=self.call_id, tool="prefetch_knowledge",
+                            args={"query": text[:200]}, allowed=True, duration_ms=round(res.latency_ms, 1),
+                            result_preview=f"{len(hits)} extraits, confiance {'faible' if res.low_confidence else 'bonne'}",
+                            rag_chunks=[h["chunk_id"] for h in hits]))
+        return "\n".join(f"- {h['content'][:500]}" for h in hits)
 
     async def _fail_before_start(self) -> None:
         org_id = None

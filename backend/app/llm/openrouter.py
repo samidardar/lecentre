@@ -87,8 +87,24 @@ class OpenRouterConversation:
             raise RuntimeError("OPENROUTER_API_KEY manquant (LLM_PROVIDER=openrouter)")
         self.s = settings
         # Connexion persistante (keep-alive) : évite un handshake TLS à chaque tour de parole.
+        # keepalive_expiry : par défaut httpx ferme une connexion inactive après 5 s, soit un nouveau handshake TLS
+        # (100–300 ms) à presque chaque tour de parole. On garde les connexions 2 minutes.
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0),
-                                                   limits=httpx.Limits(max_keepalive_connections=50, max_connections=200))
+                                                   limits=httpx.Limits(max_keepalive_connections=50, max_connections=200,
+                                                                       keepalive_expiry=120.0))
+        self._last_use = 0.0
+
+    async def warmup(self) -> None:
+        """Ouvre (ou garde ouverte) la connexion TLS avant le premier tour de parole d'un appel."""
+        import time
+
+        if time.monotonic() - self._last_use < 60:
+            return
+        self._last_use = time.monotonic()
+        try:
+            await self._client.get("https://openrouter.ai/api/v1/key", headers=headers(self.s), timeout=5)
+        except Exception:
+            pass
 
     def build_body(self, system: str, tools: list[dict[str, Any]], messages: list[dict[str, Any]]) -> dict[str, Any]:
         fallbacks = [m.strip() for m in self.s.openrouter_fallback_models.split(",") if m.strip()]
@@ -108,6 +124,9 @@ class OpenRouterConversation:
         return body
 
     async def stream(self, system: str, tools: list[dict[str, Any]], messages: list[dict[str, Any]]) -> AsyncIterator[str | TurnResult]:
+        import time
+
+        self._last_use = time.monotonic()
         body = self.build_body(system, tools, messages)
         text_parts: list[str] = []
         calls: dict[int, dict[str, str]] = {}

@@ -59,6 +59,7 @@ Hébergement : [render.yaml](render.yaml) (Render, API + PostgreSQL en un clic) 
 
 ## Documentation
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — APIs à créer, `.env`, français et voix
+- [docs/LATENCY.md](docs/LATENCY.md) — temps de réponse et qualité de voix : mesures et réglages
 - [docs/API.md](docs/API.md) — endpoints, erreurs, pagination, exemples
 - [docs/WEBSOCKET_EVENTS.md](docs/WEBSOCKET_EVENTS.md) — contrat des événements temps réel
 - [docs/ADR.md](docs/ADR.md) — décisions d'architecture

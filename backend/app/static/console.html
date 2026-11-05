@@ -245,14 +245,27 @@ function onCallEvent(e) {
   else if (e.event === "call.tool_called") addMsg("meta", "Outil " + p.tool + " " + JSON.stringify(p.args || {}) + (p.duration_ms != null ? " · " + p.duration_ms + " ms" : ""));
   else if (e.event === "call.agent_decision" && p.decision !== "route" && p.decision !== "session_started") addMsg("meta", "Superviseur : " + p.decision + (p.reason ? " (" + p.reason + ")" : ""));
   else if (e.event === "call.user_interrupted") addMsg("meta", "Interruption : l'agent s'est tu");
-  else if (e.event === "call.latency") { latencies.push(p.voice_to_voice_ms); renderMetrics(); }
+  else if (e.event === "call.latency" && p.breakdown) { lastBreakdown = p.breakdown; renderMetrics(); }
+  else if (e.event === "call.latency" && p.voice_to_voice_ms != null) { latencies.push(p.voice_to_voice_ms); renderMetrics(); }
   else if (/call\.(completed|failed|transferred)/.test(e.event)) addMsg("meta", "Fin : " + (p.outcome || p.status) + (p.summary ? " — " + p.summary : "") + (p.cost_estimate != null ? " · " + p.cost_estimate.toFixed(4) + " €" : ""));
 }
 function addMsg(kind, text) { const t = $("transcript"); t.append(el("div", { class: "msg " + kind }, text)); t.scrollTop = t.scrollHeight; }
+let lastBreakdown = null;
 function renderMetrics() {
-  if (!latencies.length) { $("callMetrics").textContent = "—"; return; }
-  const s = [...latencies].sort((a, b) => a - b);
-  $("callMetrics").textContent = "Voix→voix : dernière " + Math.round(latencies[latencies.length - 1]) + " ms · médiane " + Math.round(s[Math.floor(s.length / 2)]) + " ms · " + s.length + " tours";
+  const box = $("callMetrics"); box.replaceChildren();
+  if (latencies.length) {
+    const s = [...latencies].sort((a, b) => a - b);
+    box.append(el("div", {}, "Voix→voix : dernière " + Math.round(latencies[latencies.length - 1]) + " ms · médiane " + Math.round(s[Math.floor(s.length / 2)]) + " ms · " + s.length + " tours"));
+  }
+  if (lastBreakdown) {
+    const b = lastBreakdown, parts = [];
+    if (b.source === "cache") parts.push("réponse en cache (aucun appel IA)");
+    if (b.llm_ttft_ms != null) parts.push("IA : 1er mot " + b.llm_ttft_ms + " ms");
+    if (b.tts_ttfb_ms != null) parts.push("voix : 1er son " + b.tts_ttfb_ms + " ms");
+    if (b.first_audio_ms != null) parts.push("total jusqu'au son : " + b.first_audio_ms + " ms");
+    box.append(el("div", {}, "Dernier tour — " + parts.join(" · ")));
+  }
+  if (!box.childNodes.length) box.textContent = "—";
 }
 
 // ------------------------------------------------------------------ appel navigateur
@@ -342,7 +355,8 @@ async function showCall(id) {
   box.replaceChildren(el("h2", {}, "Détail de l'appel"),
     el("p", {}, pill(c.status), " ", c.outcome || "", " · intention ", c.intent || "—", " · sentiment ", c.sentiment != null ? c.sentiment.toFixed(2) : "—"),
     el("p", { class: "muted" }, c.summary || ""),
-    el("p", { class: "muted" }, "Latence moyenne " + (c.latency.avg_ms ?? "—") + " ms · p95 " + (c.latency.p95_ms ?? "—") + " ms · coût " + c.cost_estimate.toFixed(4) + " €"));
+    el("p", { class: "muted" }, "Latence moyenne " + (c.latency.avg_ms ?? "—") + " ms · p95 " + (c.latency.p95_ms ?? "—") + " ms · coût " + c.cost_estimate.toFixed(4) + " €"),
+    el("p", { class: "muted" }, "Médianes par étape : IA 1er mot " + (c.latency.llm_ttft_ms_median ?? "—") + " ms · voix 1er son " + (c.latency.tts_ttfb_ms_median ?? "—") + " ms · jusqu'au son " + (c.latency.first_audio_ms_median ?? "—") + " ms"));
   const t = el("div", { style: "display:flex;flex-direction:column;gap:6px;margin-top:8px" });
   for (const m of c.transcript || []) t.append(el("div", { class: "msg " + (m.role === "user" ? "user" : "ai") }, m.text));
   box.append(t);

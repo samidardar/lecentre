@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from sqlalchemy import select
 
 from app.api.deps import DB, APIError, CurrentPrincipal, get_owned
@@ -18,21 +18,27 @@ async def list_numbers(p: CurrentPrincipal, db: DB) -> list[PhoneNumber]:
 
 
 @router.post("", response_model=PhoneNumberOut, status_code=201)
-async def create_number(body: PhoneNumberCreate, p: CurrentPrincipal, db: DB) -> PhoneNumber:
+async def create_number(body: PhoneNumberCreate, p: CurrentPrincipal, db: DB, bg: BackgroundTasks) -> PhoneNumber:
     if await db.scalar(select(PhoneNumber).where(PhoneNumber.number == body.number)):
         raise APIError(409, "number_taken", "Ce numéro est déjà enregistré")
     pn = PhoneNumber(organization_id=p.org_id, **body.model_dump())
     db.add(pn)
     await db.commit()
+    from app.live.warmup import warm_inbound_greetings
+
+    bg.add_task(warm_inbound_greetings, pn.id)  # accueil prêt avant le premier appel
     return pn
 
 
 @router.patch("/{number_id}", response_model=PhoneNumberOut)
-async def update_number(number_id: uuid.UUID, body: PhoneNumberUpdate, p: CurrentPrincipal, db: DB) -> PhoneNumber:
+async def update_number(number_id: uuid.UUID, body: PhoneNumberUpdate, p: CurrentPrincipal, db: DB, bg: BackgroundTasks) -> PhoneNumber:
     pn = await get_owned(db, PhoneNumber, number_id, p.org_id, "Numéro")
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(pn, k, v)
     await db.commit()
+    from app.live.warmup import warm_inbound_greetings
+
+    bg.add_task(warm_inbound_greetings, pn.id)  # accueil prêt avant le premier appel
     return pn
 
 

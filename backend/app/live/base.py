@@ -5,7 +5,7 @@ Audio entrant : PCM16 mono 16 kHz little-endian. Audio sortant : PCM16 mono 24 k
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Protocol, Union
 
 IN_RATE = 16_000
 OUT_RATE = 24_000
@@ -28,6 +28,8 @@ class LiveConfig:
     greeting_hint: str = ""  # utilisé par le mock ; Gemini reçoit la consigne via le kickoff
     resumption_handle: str | None = None
     temperature: float = 0.6
+    # Recherche anticipée : texte de l'appelant → extraits de la base à joindre au message (évite un aller-retour outil).
+    context_provider: Optional[Callable[[str], Awaitable[str]]] = None
 
 
 @dataclass
@@ -74,11 +76,18 @@ class Usage:
 
 
 @dataclass
+class TurnMetrics:
+    """Décomposition de la latence d'un tour (ms) : llm_ttft, tts_ttfb, first_audio, source (llm|cache)."""
+
+    data: dict[str, Any]
+
+
+@dataclass
 class SessionEnded:
     error: str | None = None
 
 
-LiveEvent = Union[AudioOut, InputTranscript, OutputTranscript, TurnComplete, Interrupted, ToolCall, Usage, SessionEnded]
+LiveEvent = Union[AudioOut, InputTranscript, OutputTranscript, TurnComplete, Interrupted, ToolCall, Usage, TurnMetrics, SessionEnded]
 
 
 class LiveSession(Protocol):

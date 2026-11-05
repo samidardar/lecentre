@@ -182,3 +182,63 @@ async def test_short_utterance_waits_for_continuation() -> None:
     user_msgs = [m for m in session.messages if m["role"] == "user"]
     assert len(user_msgs) == 1 and user_msgs[0]["content"] == "Bonjour. je voudrais un rendez-vous demain matin"
     await session.close()
+
+
+async def test_greeting_from_cache_skips_llm() -> None:
+    from app.live.base import TurnMetrics
+
+    llm, stt, ttss = FakeLLM(), FakeSTT(), []
+
+    def tts_factory() -> FakeTTS:
+        t = FakeTTS()
+        ttss.append(t)
+        return t
+
+    import uuid as _uuid
+
+    greeting = f"Bonjour, VéloCity Paris, je vous écoute. ({_uuid.uuid4().hex[:6]})"
+    sources = []
+    for _ in range(2):  # 1er appel : synthèse en direct puis mise en cache ; 2e appel : lu depuis le cache
+        cfg = LiveConfig("sys", greeting_hint=greeting)
+        session = CascadeLiveSession(cfg, get_settings(), llm=llm, stt_factory=lambda: stt, tts_factory=tts_factory)
+        events = session.events()
+        await session.send_text("[APPEL_DEBUT] Accueille l'appelant.")
+        seen = await collect_until(events, TurnComplete)
+        sources.append([e.data for e in seen if isinstance(e, TurnMetrics)][0]["source"])
+        assert any(isinstance(e, AudioOut) for e in seen)
+        assert session.messages[-1] == {"role": "assistant", "content": greeting}
+        await session.close()
+    assert sources == ["tts", "cache"]
+    assert llm.calls == []  # l'accueil ne passe jamais par le LLM
+
+
+async def test_context_provider_attaches_extracts() -> None:
+    async def provider(text: str) -> str:
+        return "- Ouvert de 9h à 19h du lundi au samedi."
+
+    llm, stt = FakeLLM(), FakeSTT()
+    cfg = LiveConfig("sys", context_provider=provider)
+    session = CascadeLiveSession(cfg, get_settings(), llm=llm, stt_factory=lambda: stt, tts_factory=FakeTTS)
+    events = session.events()
+    await session.send_text("Bonjour")
+    await collect_until(events, TurnComplete)
+    sent = llm.calls[-1][-1]["content"]
+    assert sent.startswith("Bonjour") and "[EXTRAITS DE LA BASE" in sent and "9h à 19h" in sent
+    await session.close()
+
+
+async def test_filler_and_normalized_speech_on_tool_call() -> None:
+    session, llm, _, ttss = make_session()
+    await session._prefetch_fillers(delay=0)  # en production : 2 s après le décroché
+    events = session.events()
+    await session.send_text("Quels sont vos horaires ?")
+    seen = await collect_until(events, ToolCall)
+    spoken = "".join(e.text for e in seen if isinstance(e, OutputTranscript))
+    assert spoken.strip() in {"Je regarde ça.", "Un instant, je vérifie.", "Très bien, je regarde."}
+    call = seen[-1].calls[0]
+    await session.send_tool_responses([(call.id, call.name, {"results": []})])
+    await collect_until(events, TurnComplete)
+    tts_texts = " ".join(t for tts in ttss for t in tts.texts)
+    assert "neuf heures à dix-neuf heures" in tts_texts  # la voix lit les heures en toutes lettres
+    assert session.messages[1]["content"][0] == {"type": "text", "text": spoken.strip()}
+    await session.close()

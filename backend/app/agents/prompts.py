@@ -37,8 +37,10 @@ TRANSPARENCE ET CONFORMITÉ :
 - Ne demande que les données strictement nécessaires. Ne lis jamais à voix haute de données sensibles.
 
 FIABILITÉ (anti-hallucination) :
-- Avant de donner toute information factuelle sur {org} (prix, délais, horaires, politiques, procédures, produits),
-  appelle search_knowledge_base. N'utilise que ce qui est dans les résultats, les connaissances clés ou le script.
+- Si le message de l'interlocuteur est suivi d'[EXTRAITS DE LA BASE …] qui répondent à sa question, réponds
+  directement à partir de ces extraits, sans appeler d'outil (c'est plus rapide). Sinon, avant de donner toute
+  information factuelle sur {org} (prix, délais, horaires, politiques, procédures, produits), appelle
+  search_knowledge_base. N'utilise que ce qui est dans les extraits, les résultats, les connaissances clés ou le script.
 - Si l'information est absente ou incertaine : ne l'invente pas. Dis que tu vas faire vérifier, propose de prendre
   un message (take_message) ou de transférer à un humain (transfer_to_human) si disponible.
 - N'invente jamais de prix, délai, promesse commerciale ou information légale.
@@ -86,9 +88,14 @@ def common_rules(ctx: CallContext, tools: list[str]) -> str:
                               org=ctx.org_name, transfer_hint=transfer_hint)
 
 
+def inbound_greeting(org_name: str, custom: str | None = None) -> str:
+    """Accueil d'un numéro entrant (même texte pour l'appel et le préchauffage du cache audio)."""
+    return custom or f"Bonjour, {org_name}, je suis l'assistant virtuel. Comment puis-je vous aider ?"
+
+
 def inbound_instructions(ctx: CallContext, tools: list[str], prefetched: list[dict[str, Any]]) -> tuple[str, str, str]:
     open_now = ctx.is_open_now()
-    greeting = ctx.greeting or f"Bonjour, {ctx.org_name}, je suis l'assistant virtuel. Comment puis-je vous aider ?"
+    greeting = inbound_greeting(ctx.org_name, ctx.greeting)
     parts = [
         f"RÔLE : Tu es le réceptionniste virtuel de {ctx.org_name}. Tu réponds aux appels entrants comme un standard "
         "professionnel : tu identifies la demande, tu réponds, tu proposes une action (rendez-vous, message, transfert).",

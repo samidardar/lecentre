@@ -21,15 +21,21 @@ from app.core.config import Settings, get_settings
 from app.core.metrics import LIVE_ERRORS
 from app.live.base import (
     OUT_RATE, AudioOut, InputTranscript, Interrupted, LiveConfig, LiveEvent, OutputTranscript, SessionEnded, ToolCall,
-    ToolCallItem, TurnComplete, Usage,
+    ToolCallItem, TurnComplete, TurnMetrics, Usage,
 )
 from app.live.deepgram import DeepgramSTT
 from app.live.fish import FishTTSStream
 from app.llm.claude import ClaudeConversation, ConversationLLM, TurnResult, to_anthropic_tools
+from app.live.tts_cache import TTSCache, get_tts_cache
 from app.voice.audio import Resampler
+from app.voice.tts_text import normalize_for_tts
 
 logger = logging.getLogger(__name__)
 
+# Phrases d'attente jouées instantanément (audio en cache) pendant un appel d'outil.
+FILLERS = ["Je regarde ça.", "Un instant, je vérifie.", "Très bien, je regarde."]
+SLOW_TOOLS = {"search_knowledge_base", "book_appointment", "crm_lookup", "take_message"}
+CONTEXT_HEADER = "[EXTRAITS DE LA BASE — à utiliser seulement s'ils répondent exactement à la question]"
 _SENTENCE_END = re.compile(r"([.!?…:;])(\s|$)")
 OPERATOR_NOTE = (
     "\n\nMESSAGES ENTRE CROCHETS : les messages qui commencent par [APPEL_DEBUT], [SUPERVISEUR], [SILENCE], "
@@ -77,7 +83,51 @@ class CascadeLiveSession:
         self._pending_tools: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._closed = False
         self._warm: tuple[Any, asyncio.Task[None]] | None = None
+        self._cache: TTSCache = get_tts_cache(settings)
+        self._filler_i = 0
+        self._turn_t0: float | None = None
+        self._bg: set[asyncio.Task[Any]] = set()
         self._prewarm()
+        # Phrases d'attente mises en cache en arrière-plan, une par une, après le début de l'appel
+        # (sans concurrencer l'accueil ni consommer la limite de connexions simultanées Fish).
+        self._spawn(self._prefetch_fillers())
+
+    async def _prefetch_fillers(self, delay: float = 2.0) -> None:
+        await asyncio.sleep(delay)
+        for text in FILLERS:
+            if self._closed:
+                return
+            if self._cache.get(self._cache_key(text)) is None:
+                await self._cached_pcm(text)
+
+    def _spawn(self, coro: Any) -> None:
+        task = asyncio.ensure_future(coro)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    def _cache_key(self, text: str) -> str:
+        tts = getattr(self, "_probe_tts", None) or self._tts_factory()
+        self._probe_tts = tts
+        return self._cache.key(normalize_for_tts(text), getattr(tts, "voice_id", None), getattr(tts, "speed", self.s.fish_speed),
+                               getattr(tts, "sample_rate", OUT_RATE))
+
+    async def _cached_pcm(self, text: str) -> bytes:
+        try:
+            return await self._cache.get_or_synth(self._cache_key(text), normalize_for_tts(text), self._tts_factory)
+        except Exception as exc:
+            logger.warning("synthèse en cache échouée (%s): %s", text[:40], exc)
+            return b""
+
+    async def _play_pcm(self, pcm: bytes, sample_rate: int, *, paced: bool = True) -> None:
+        """Joue un audio déjà prêt, au rythme réel (le barge-in peut l'interrompre à tout moment)."""
+        resample = Resampler(sample_rate, OUT_RATE)
+        step = sample_rate // 10 * 2  # 100 ms
+        self._speaking = True
+        lead = 3  # ~300 ms d'avance dans le tampon du transport
+        for i, start in enumerate(range(0, len(pcm), step)):
+            await self._q.put(AudioOut(resample(pcm[start : start + step])))
+            if paced and i >= lead:
+                await asyncio.sleep(0.095)
 
     # ================================================================ TTS préouvert
     def _prewarm(self) -> None:
@@ -172,9 +222,64 @@ class CascadeLiveSession:
         if not turn_complete:
             self._pending_notes.append(text)
             return
+        if text.startswith("[APPEL_DEBUT]") and self.cfg.greeting_hint:
+            await self._start_canned_turn(text, self.cfg.greeting_hint)
+            return
         if not text.startswith("["):  # réplique d'un appelant simulé (tests, démo texte)
             await self._q.put(InputTranscript(text))
         await self._start_turn(text)
+
+    async def _start_canned_turn(self, kickoff: str, reply: str) -> None:
+        """Accueil : audio en cache, aucun appel au LLM (latence quasi nulle dès le 2e appel)."""
+        if self._turn is not None and not self._turn.done():
+            self._turn.cancel()
+        self.messages.append({"role": "user", "content": kickoff})
+        self.messages.append({"role": "assistant", "content": reply})
+        self._turn = asyncio.create_task(self._run_canned(reply))
+
+    async def _run_canned(self, reply: str) -> None:
+        import time
+
+        t0 = time.perf_counter()
+        self._spoken = [reply]
+        key = self._cache_key(reply)
+        pcm = self._cache.get(key)
+        try:
+            await self._q.put(OutputTranscript(reply + " "))
+            if pcm:
+                await self._q.put(TurnMetrics({"source": "cache", "first_audio_ms": round((time.perf_counter() - t0) * 1000)}))
+                sr = getattr(getattr(self, "_probe_tts", None), "sample_rate", OUT_RATE)
+                await self._play_pcm(pcm, sr)
+            else:
+                await self._stream_and_cache(reply, key, t0)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._speaking = False
+        await self._q.put(TurnComplete())
+
+    async def _stream_and_cache(self, text: str, key: str, t0: float) -> None:
+        """1re fois : lecture en direct pendant la synthèse (1er son ≈ 0,8 s), puis mise en cache pour les appels suivants."""
+        import time
+
+        tts, opening = self._acquire_tts()
+        resample = Resampler(getattr(tts, "sample_rate", OUT_RATE), OUT_RATE)
+        pcm = bytearray()
+        try:
+            await opening
+            await tts.send_text(normalize_for_tts(text), flush=True)
+            await tts.finish()
+            async for chunk in tts.audio():
+                if not pcm:
+                    await self._q.put(TurnMetrics({"source": "tts", "first_audio_ms": round((time.perf_counter() - t0) * 1000)}))
+                pcm.extend(chunk)
+                self._speaking = True
+                await self._q.put(AudioOut(resample(chunk)))
+        finally:
+            await tts.close()
+            self._prewarm()
+        if pcm:
+            self._cache.put(key, bytes(pcm))
 
     async def send_tool_responses(self, responses: list[tuple[str, str, dict[str, Any]]]) -> None:
         for call_id, _name, result in responses:
@@ -198,21 +303,42 @@ class CascadeLiveSession:
                 await self._turn
             if was_speaking:
                 await self._q.put(Interrupted())
+        import time
+
+        self._turn_t0 = time.perf_counter()
         notes = "\n".join(self._pending_notes)
         self._pending_notes.clear()
         content = f"{notes}\n{user_text}" if notes else user_text
+        if self.cfg.context_provider is not None and not user_text.startswith("["):
+            # Recherche anticipée dans la base (~15 ms) : la plupart des questions FAQ n'ont plus besoin d'outil.
+            try:
+                extracts = await asyncio.wait_for(self.cfg.context_provider(user_text), 0.4)
+            except Exception:
+                extracts = ""
+            if extracts:
+                content = f"{content}\n\n{CONTEXT_HEADER}\n{extracts}"
         self.messages.append({"role": "user", "content": content})
         self._turn = asyncio.create_task(self._run_turn())
 
     async def _run_turn(self) -> None:
+        import time
+
         tts, opening = self._acquire_tts()
         audio_task: asyncio.Task[None] | None = None
         tts_used = False
         self._spoken = []
         resample = Resampler(getattr(tts, "sample_rate", OUT_RATE), OUT_RATE)
+        t0 = self._turn_t0 or time.perf_counter()
+        marks: dict[str, Any] = {"source": "llm"}
 
         async def pump_audio() -> None:
             async for chunk in tts.audio():
+                if "first_audio_ms" not in marks:
+                    now = time.perf_counter()
+                    marks["first_audio_ms"] = round((now - t0) * 1000)
+                    if "_tts_sent" in marks:
+                        marks["tts_ttfb_ms"] = round((now - marks.pop("_tts_sent")) * 1000)
+                    await self._q.put(TurnMetrics({k: v for k, v in marks.items() if not k.startswith("_")}))
                 self._speaking = True
                 await self._q.put(AudioOut(resample(chunk)))
 
@@ -224,7 +350,8 @@ class CascadeLiveSession:
             if audio_task is None:
                 audio_task = asyncio.create_task(pump_audio())
             tts_used = True
-            await tts.send_text(sentence, flush=True)
+            marks.setdefault("_tts_sent", time.perf_counter())
+            await tts.send_text(normalize_for_tts(sentence), flush=True)  # la voix lit le texte normalisé
             self._spoken.append(sentence)
             await self._q.put(OutputTranscript(sentence + " "))
 
@@ -232,10 +359,12 @@ class CascadeLiveSession:
             for _ in range(6):  # borne les allers-retours outils dans un même tour
                 buf = ""
                 result: TurnResult | None = None
+                t_req = time.perf_counter()
                 async for piece in self.llm.stream(self._system, self._tools, self.messages):
                     if isinstance(piece, TurnResult):
                         result = piece
                         break
+                    marks.setdefault("llm_ttft_ms", round((time.perf_counter() - t_req) * 1000))
                     buf += piece
                     sentence, buf = split_speakable(buf)
                     await speak(sentence)
@@ -246,6 +375,8 @@ class CascadeLiveSession:
                 self.messages.append({"role": "assistant", "content": result.content})
                 if result.stop_reason != "tool_use" or not result.tool_uses:
                     break
+                if not self._spoken and any(t.name in SLOW_TOOLS for t in result.tool_uses):
+                    await self._play_filler()
                 await self._run_tools(result)
             if tts_used:
                 await tts.finish()
@@ -274,6 +405,21 @@ class CascadeLiveSession:
             self._speaking = False
             self._prewarm()
         await self._q.put(TurnComplete())
+
+    async def _play_filler(self) -> None:
+        """« Je regarde ça. » instantané pendant l'outil + le second appel LLM ; noté dans l'historique."""
+        text = FILLERS[self._filler_i % len(FILLERS)]
+        self._filler_i += 1
+        pcm = self._cache.get(self._cache_key(text))
+        if not pcm:
+            return  # pas encore en cache : on ne bloque pas le tour pour ça
+        self._spoken.append(text)
+        await self._q.put(OutputTranscript(text + " "))
+        sr = getattr(getattr(self, "_probe_tts", None), "sample_rate", OUT_RATE)
+        await self._play_pcm(pcm, sr, paced=False)
+        last = self.messages[-1]
+        if last["role"] == "assistant" and isinstance(last["content"], list):
+            last["content"].insert(0, {"type": "text", "text": text})
 
     async def _run_tools(self, result: TurnResult) -> None:
         loop = asyncio.get_running_loop()
@@ -322,6 +468,8 @@ class CascadeLiveSession:
 
     async def close(self) -> None:
         self._closed = True
+        for task in list(self._bg):
+            task.cancel()
         if self._warm is not None:
             tts, opening = self._warm
             opening.cancel()
@@ -356,6 +504,9 @@ class CascadeLiveModel:
         self.llm = llm or build_conversation_llm(self.s)
 
     async def connect(self, config: LiveConfig) -> CascadeLiveSession:
+        warm = getattr(self.llm, "warmup", None)
+        if warm is not None:
+            asyncio.ensure_future(warm())  # connexion LLM prête avant que l'appelant ne parle
         return CascadeLiveSession(
             config, self.s, llm=self.llm,
             stt_factory=lambda: DeepgramSTT(self.s, language=config.language),

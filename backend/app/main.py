@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     websocket.hub.start()
     analytics_task = asyncio.create_task(analytics_agent.run())
     await mcp_manager.start()
+    from app.live.warmup import warm_inbound_greetings
+
+    warm_task = asyncio.create_task(warm_inbound_greetings())  # accueils instantanés dès le 1er appel
     manager, dispatcher = get_call_manager(), get_dispatcher()
     if app.state.run_dispatcher:
         await dispatcher.recover()
@@ -52,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        warm_task.cancel()
         await dispatcher.shutdown()
         await manager.shutdown()
         await analytics_agent.stop()

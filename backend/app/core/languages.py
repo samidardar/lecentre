@@ -68,6 +68,17 @@ FISH_FR_VOICES: dict[str, tuple[str, str]] = {
 }
 
 
+# Vitesse par voix, mesurée pour viser ~170 mots/min (débit naturel au téléphone) : mesures du 06/11/2026.
+FISH_VOICE_SPEED: dict[str, float] = {
+    "5567200c7d8341738f0892bbacd3be3c": 1.0,   # 171 mots/min
+    "a288bdc744da4ad194921adad6863175": 1.0,   # 168
+    "10a3a20742114a4ea6dd441e7591850f": 0.95,  # 180 à 1.0
+    "0638c82cfa894e8fb71f42487f69e050": 0.85,  # 198 à 1.0
+    "6e10fb8946b34ba6bec447789ccdc3de": 1.0,   # 172
+    "f69bca092b674168a8d02d61ca20943c": 0.9,   # 195 à 1.0
+}
+
+
 def validate_voice(name: str | None) -> str | None:
     """Accepte une voix Gemini (par nom) ou une voix Fish Audio (reference_id de 32 caractères hexadécimaux)."""
     if name in (None, ""):

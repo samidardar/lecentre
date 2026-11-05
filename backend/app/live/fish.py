@@ -24,6 +24,10 @@ class FishTTSStream:
         self.voice_id = voice_id or settings.fish_voice_id
         self._ws: Any = None
         self.sample_rate = settings.fish_sample_rate
+        from app.core.languages import FISH_VOICE_SPEED
+
+        # Débit naturel : vitesse globale × correction mesurée de la voix.
+        self.speed = round(settings.fish_speed * FISH_VOICE_SPEED.get(self.voice_id or "", 1.0), 3)
 
     async def open(self) -> None:
         from websockets.asyncio.client import connect
@@ -35,7 +39,7 @@ class FishTTSStream:
         )
         request: dict[str, Any] = {
             "text": "", "format": "pcm", "sample_rate": self.sample_rate, "latency": self.s.fish_latency,
-            "normalize": True, "prosody": {"speed": self.s.fish_speed, "volume": 0},
+            "normalize": True, "prosody": {"speed": self.speed, "volume": 0},
         }
         if self.voice_id:
             request["reference_id"] = self.voice_id
